@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>tnkr.fun | Incoming Transmission…</title>
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<style>
+/* ── Layout & copy ─────────────────────────────── */
+html,body{
+  height:100%;margin:0;
+  font-family:system-ui,Segoe UI,Roboto,sans-serif;
+  color:#E0E8FF;background:#0d0d26;
+  overflow:hidden;
+}
+.wrap{
+  position:relative;z-index:10;
+  height:100%;display:flex;flex-direction:column;
+  justify-content:center;align-items:center;text-align:center;
+}
+h1{font-size:clamp(2.5rem,6vw,5rem);margin:.2em 0;}
+p{max-width:40ch;line-height:1.5;font-size:1.1rem;}
+.blink{animation:blink 2s linear infinite}
+@keyframes blink{50%{opacity:.4}}
+footer{margin-top:2em;font-size:.9rem;opacity:.6}
+
+/* ── Star canvas ──────────────────────────────── */
+#starfield{position:fixed;inset:0;z-index:1}
+
+/* ── UFOs ─────────────────────────────────────── */
+.ufo{
+  position:fixed;width:200px;height:120px;
+  transform:translateX(-50%);
+  pointer-events:auto;
+  animation:hover 4s ease-in-out infinite;
+  z-index:15;                /* above text */
+}
+@keyframes hover{
+  0%,100%{transform:translate(-50%,0)}
+  50%   {transform:translate(-50%,16px)}
+}
+.ufo--top{top:7vh;left:50%;z-index:20;}
+.ufo--mid{top:70vh;left:20%;animation-delay:.7s;}
+.ufo--low{top:78vh;left:80%;animation-delay:1.4s;}
+
+.ufo:hover .beam{animation:beamPulse 2s ease-in-out infinite}
+@keyframes beamPulse{0%,100%{opacity:0}50%{opacity:1}}
+
+.ufo-link{display:block;width:200px;height:120px;text-decoration:none;}
+.ufo-link svg{width:100%;height:100%}
+</style>
+</head>
+<body>
+
+<!-- ── Star field (ASCII-only) ────────────────── -->
+<canvas id="starfield"></canvas>
+<script>
+(() => {
+  const N=300,R0=0.6,R1=1.8,TW=7000;
+  const c=document.getElementById('starfield'),ctx=c.getContext('2d');
+  let stars=[];
+  function resize(){
+    c.width=innerWidth;c.height=innerHeight;
+    stars=Array.from({length:N},()=>({
+      x:Math.random()*c.width,
+      y:Math.random()*c.height,
+      r:R0+Math.random()*(R1-R0),
+      phase:Math.random()*6.28318
+    }));
+  }
+  function draw(t){
+    ctx.clearRect(0,0,c.width,c.height);
+    stars.forEach(s=>{
+      const a=0.3+0.7*Math.abs(Math.sin((t+s.phase*1e3)/TW));
+      ctx.fillStyle=`rgba(255,255,255,${a})`;
+      ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,6.28318);ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+  addEventListener('resize',resize);resize();requestAnimationFrame(draw);
+})();
+</script>
+
+<!-- ── Copy ───────────────────────────────────── -->
+<div class="wrap">
+	<h1>👽  Greetings, Earth Unit!</h1>
+  <p>Our mothership is <span class="blink">parallel-parking</span> in low orbit.<br>
+     While we calibrate the tractor beams, please<br>
+     <strong>remain calm, hydrate, and avoid probing jokes.</strong></p>
+  <p><em>Fun is coming.</em></p>
+  <footer>Transmission ID #42 • Powered by questionable DNS decisions</footer>
+</div>
+
+<!-- ── Saucer 1 (top) ─────────────────────────── -->
+<a href="https://tnkr.fun" class="ufo ufo--top ufo-link" aria-label="Go home">
+<svg class="ufo ufo--top" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="gradTop" x1=".5" y1="0" x2=".5" y2="1">
+    <stop offset="0%" stop-color="rgba(173,216,255,0)"/>
+    <stop offset="80%" stop-color="rgba(173,216,255,0.35)"/>
+    <stop offset="100%" stop-color="rgba(173,216,255,0.6)"/>
+  </linearGradient></defs>
+  <polygon class="beam" points="100,60 60,120 140,120" fill="url(#gradTop)" opacity="0"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="#9ea2a8"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="white" opacity="0.15"/>
+  <ellipse cx="100" cy="38" rx="30" ry="18" fill="#b9e3ff" stroke="#86c9ff" stroke-width="2"/>
+  <circle cx="55" cy="60" r="5" fill="#ffd35c"/>
+  <circle cx="83" cy="67" r="5" fill="#ffd35c"/>
+  <circle cx="117" cy="67" r="5" fill="#ffd35c"/>
+  <circle cx="145" cy="60" r="5" fill="#ffd35c"/>
+</svg>
+</a>
+
+<!-- ── Saucer 2 (mid, secret link) ────────────── -->
+<a href="https://auth.app.tnkr.fun" class="ufo ufo--mid ufo-link" aria-label="Secret portal">
+<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="gradMid" x1=".5" y1="0" x2=".5" y2="1">
+    <stop offset="0%" stop-color="rgba(173,216,255,0)"/>
+    <stop offset="80%" stop-color="rgba(173,216,255,0.35)"/>
+    <stop offset="100%" stop-color="rgba(173,216,255,0.6)"/>
+  </linearGradient></defs>
+  <polygon class="beam" points="100,60 60,120 140,120" fill="url(#gradMid)" opacity="0"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="#9ea2a8"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="white" opacity=".15"/>
+  <ellipse cx="100" cy="38" rx="30" ry="18" fill="#b9e3ff" stroke="#86c9ff" stroke-width="2"/>
+  <circle cx="55" cy="60" r="5" fill="#ffd35c"/>
+  <circle cx="83" cy="67" r="5" fill="#ffd35c"/>
+  <circle cx="117" cy="67" r="5" fill="#ffd35c"/>
+  <circle cx="145" cy="60" r="5" fill="#ffd35c"/>
+</svg>
+</a>
+
+<!-- ── Saucer 3 (low) ─────────────────────────── -->
+<svg class="ufo ufo--low" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><linearGradient id="gradLow" x1=".5" y1="0" x2=".5" y2="1">
+    <stop offset="0%" stop-color="rgba(173,216,255,0)"/>
+    <stop offset="80%" stop-color="rgba(173,216,255,0.35)"/>
+    <stop offset="100%" stop-color="rgba(173,216,255,0.6)"/>
+  </linearGradient></defs>
+  <polygon class="beam" points="100,60 60,120 140,120" fill="url(#gradLow)" opacity="0"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="#9ea2a8"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="white" opacity=".15"/>
+  <ellipse cx="100" cy="38" rx="30" ry="18" fill="#b9e3ff" stroke="#86c9ff" stroke-width="2"/>
+  <circle cx="55" cy="60" r="5" fill="#ffd35c"/>
+  <circle cx="83" cy="67" r="5" fill="#ffd35c"/>
+  <circle cx="117" cy="67" r="5" fill="#ffd35c"/>
+  <circle cx="145" cy="60" r="5" fill="#ffd35c"/>
+</svg>
+
+</body>
+</html>
+

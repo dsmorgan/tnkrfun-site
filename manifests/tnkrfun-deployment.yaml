@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tnkrfun
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tnkrfun
+  template:
+    metadata:
+      labels:
+        app: tnkrfun
+    spec:
+      containers:
+      - name: web
+        image: ghcr.io/dsmorgan/tnkfun-site:latest
+        ports:
+        - containerPort: 80
+

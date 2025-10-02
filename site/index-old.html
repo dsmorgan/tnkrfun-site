@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>👽 tnkr.fun – Incoming Transmission…</title>
+  <style>
+    /* Simple star-field vibe */
+    html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;
+      color:#E0E8FF;
+       background: 
+        url('starfield-small.svg') repeat,
+        url('starfield-big.svg')  repeat,
+        #0d0d26;           /* solid deep-space backdrop */
+       background-size:
+        6px 6px,           /* small twinkles every 6 px */
+        20px 20px,         /* big stars every 20 px */
+        auto;
+
+    }
+    .wrap{display:flex;flex-direction:column;justify-content:center;align-items:center;height:100%;}
+    h1{font-size:clamp(2.5rem,6vw,5rem);margin:.2em 0;}
+    p{max-width:40ch;text-align:center;line-height:1.5;font-size:1.1rem;}
+    .blink{animation:blink 2s linear infinite;}
+    @keyframes blink{50%{opacity:.4;}}
+    footer{margin-top:2em;font-size:.9rem;opacity:.6;}
+    a{color:#9cf;text-decoration:none;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>👽 Greetings, Earth Unit!</h1>
+    <p>
+      Our mothership is <span class="blink">parallel-parking</span> in low orbit.<br>
+      While we calibrate the tractor beams, please<br>
+      <strong>remain calm, hydrate, and avoid probing jokes.</strong>
+    </p>
+    <p>
+      In the meantime, know this: <em>fun is coming</em>.
+    </p>
+    <footer>
+      Transmission ID #42 • Powered by questionable DNS decisions
+    </footer>
+  </div>
+</body>
+</html>
+

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>👽 Greetings, Earth Unit!</title>
+<style>
+  /* 1️⃣  Layout + fonts (unchanged) */
+  html,body{height:100%;margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;
+    color:#E0E8FF;background:#0d0d26;overflow:hidden;}
+  .wrap{position:relative;z-index:10;height:100%;display:flex;flex-direction:column;
+    justify-content:center;align-items:center;text-align:center;}
+  h1{font-size:clamp(2.5rem,6vw,5rem);margin:.2em 0;}
+  p{max-width:40ch;line-height:1.5;font-size:1.1rem;}
+  .blink{animation:blink 2s linear infinite;}
+  @keyframes blink{50%{opacity:.4;}}
+  footer{margin-top:2em;font-size:.9rem;opacity:.6;}
+
+  /* Full-screen canvas sits underneath content */
+  #starfield{position:fixed;top:0;left:0;width:100%;height:100%;z-index:1;}
+
+  /* UFO positioning and animation */
+#ufo{
+  position:fixed;           /* floats above everything */
+  top:15vh; left:50%;       /* roughly upper-middle */
+  transform:translateX(-50%);
+  pointer-events:auto;      /* so :hover works */
+  animation: hover 4s ease-in-out infinite;
+  z-index:20;
+}
+@keyframes hover{
+  0%,100%{ transform:translate(-50%,0); }
+  50%    { transform:translate(-50%,-8px); }
+}
+
+/* Beam fades in on hover */
+#ufo:hover #beam{
+  animation: beamPulse 2s ease-in-out infinite;
+}
+@keyframes beamPulse{
+  0%,100%{ opacity:0; }
+  50%    { opacity:1; }
+}
+
+</style>
+</head>
+<body>
+  <!-- Star canvas -->
+  <canvas id="starfield"></canvas>
+  <!-- ⬇️  Place this just after <canvas id="starfield"> (before .wrap) -->
+<svg id="ufo" viewBox="0 0 200 120" width="200" height="120"
+     xmlns="http://www.w3.org/2000/svg">
+  <!-- Beam (hidden until hover) -->
+  <defs>
+    <linearGradient id="beamGrad" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0%"  stop-color="rgba(173,216,255,0.0)"/>
+      <stop offset="80%" stop-color="rgba(173,216,255,0.35)"/>
+      <stop offset="100%" stop-color="rgba(173,216,255,0.6)"/>
+    </linearGradient>
+  </defs>
+  <polygon id="beam" points="100,60 60,120 140,120" fill="url(#beamGrad)" opacity="0"/>
+  <!-- Saucer body -->
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="#9ea2a8"/>
+  <ellipse cx="100" cy="60" rx="65" ry="18" fill="url(#bodyShine)" opacity="0.15"/>
+  <!-- Dome -->
+  <ellipse cx="100" cy="38" rx="30" ry="18" fill="#b9e3ff" stroke="#86c9ff" stroke-width="2"/>
+  <!-- Lights -->
+  <circle cx="55"  cy="60" r="5" fill="#ffd35c"/>
+  <circle cx="80"  cy="70" r="5" fill="#ffd35c"/>
+  <circle cx="120" cy="70" r="5" fill="#ffd35c"/>
+  <circle cx="145" cy="60" r="5" fill="#ffd35c"/>
+</svg>
+
+
+  <!-- Foreground content -->
+  <div class="wrap">
+    <h1>👽 Greetings, Earth Unit!</h1>
+    <p>
+      Our mothership is <span class="blink">parallel-parking</span> in low orbit.<br>
+      While we calibrate the tractor beams, please<br>
+      <strong>remain calm, hydrate, and avoid probing jokes.</strong>
+    </p>
+    <p><em>Fun is coming.</em></p>
+    <footer>Transmission ID #42 • Powered by questionable DNS decisions</footer>
+  </div>
+
+<script>
+/* === Starfield paint-once + gentle twinkle ========================= */
+(() => {
+  const STAR_COUNT   = 300;   // raise/lower for density
+  const STAR_MIN_R   = 0.6;   // min radius
+  const STAR_MAX_R   = 1.8;   // max radius
+  const TWINKLE_INT  = 7000;  // ms for a full brightness cycle
+
+  const canvas = document.getElementById('starfield');
+  const ctx    = canvas.getContext('2d');
+  let stars    = [];
+
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    makeStars();
+  }
+
+  function makeStars() {
+    stars = Array.from({length: STAR_COUNT}, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: STAR_MIN_R + Math.random() * (STAR_MAX_R - STAR_MIN_R),
+      phase: Math.random() * 2 * Math.PI,        // individual twinkle offset
+    }));
+  }
+
+  function draw(time) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    stars.forEach(s => {
+      // sine-wave alpha between 0.3 and 1.0
+      const alpha = 0.3 + 0.7 * Math.abs(Math.sin((time + s.phase*1000) / TWINKLE_INT));
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, Math.PI*2);
+      ctx.fill();
+    });
+    requestAnimationFrame(draw);
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
+

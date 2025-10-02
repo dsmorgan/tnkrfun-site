@@ -1,0 +1,7 @@
+<!-- starfield-small.svg -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="4" height="4" fill="white" opacity=".35">
+  <!-- one 1-px star per tile -->
+  <circle cx="1" cy="1" r="1"/>
+</svg>
+

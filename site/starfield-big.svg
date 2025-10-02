@@ -1,0 +1,10 @@
+<!-- starfield-big.svg -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="20" height="20" fill="white">
+  <!-- sprinkle a handful of 1–1.5 px stars in a larger tile -->
+  <circle cx="3"  cy="4"  r="1"/>
+  <circle cx="14" cy="6"  r="1.5"/>
+  <circle cx="8"  cy="15" r="1"/>
+  <circle cx="18" cy="12" r="1"/>
+  <circle cx="11" cy="18" r="1"/>
+</svg>
