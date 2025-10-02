@@ -12,6 +12,8 @@ spec:
       labels:
         app: tnkrfun
     spec:
+      imagePullSecrets:
+      - name: ghcr-secret
       containers:
       - name: web
         image: ghcr.io/dsmorgan/tnkfun-site:latest
