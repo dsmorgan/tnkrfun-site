@@ -50,7 +50,7 @@ jobs:
           # Extract the first SHA-based tag from docker/metadata-action
           SHA_TAG=$(echo "${{ steps.meta.outputs.tags }}" | tr ' ' '\n' | grep 'sha-' | head -n 1)
           echo "Using SHA_TAG=$SHA_TAG"
-          sed -i "s#image: ghcr.io/${{ github.repository }}:.*#image: ghcr.io/${{ github.repository }}:${SHA_TAG}#" manifests/deployment.yaml
+          sed -i "s#image: ghcr.io/${{ github.repository }}:.*#image: ${SHA_TAG}#" manifests/tnkrfun-deployment.yaml
 
       - name: Commit updated manifests
         run: |
