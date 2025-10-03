@@ -47,9 +47,11 @@ jobs:
 
       - name: Update manifests with new image tag
         run: |
-          SHA_TAG=$(echo ${{ steps.meta.outputs.tags }} | awk '{print $1}' | grep sha-)
+          # Extract the first SHA-based tag from docker/metadata-action
+          SHA_TAG=$(echo "${{ steps.meta.outputs.tags }}" | tr ' ' '\n' | grep 'sha-' | head -n 1)
+          echo "Using SHA_TAG=$SHA_TAG"
           sed -i "s#image: ghcr.io/${{ github.repository }}:.*#image: ghcr.io/${{ github.repository }}:${SHA_TAG}#" manifests/deployment.yaml
-
+`
       - name: Commit updated manifests
         run: |
           git config --global user.name "github-actions[bot]"
