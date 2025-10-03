@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # needed to push manifest changes
       packages: write
 
     steps:
@@ -32,6 +32,10 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=raw,value=latest
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
@@ -41,3 +45,15 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Update manifests with new image tag
+        run: |
+          SHA_TAG=$(echo ${{ steps.meta.outputs.tags }} | awk '{print $1}' | grep sha-)
+          sed -i "s#image: ghcr.io/${{ github.repository }}:.*#image: ghcr.io/${{ github.repository }}:${SHA_TAG}#" manifests/deployment.yaml
+
+      - name: Commit updated manifests
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifests/deployment.yaml
+          git commit -m "ci: update deployment to ${SHA_TAG}" || echo "No changes to commit"
+          git push
