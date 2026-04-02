@@ -16,7 +16,7 @@ spec:
       - name: ghcr-secret
       containers:
       - name: web
-        image: ghcr.io/dsmorgan/tnkrfun-site:sha-ad76c15
+        image: ghcr.io/dsmorgan/tnkrfun-site:sha-04e3fd6
         ports:
         - containerPort: 80
 
