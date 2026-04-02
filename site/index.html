@@ -48,6 +48,79 @@ footer{margin-top:2em;font-size:.9rem;opacity:.6}
 
 .ufo-link{display:block;width:200px;height:120px;text-decoration:none;}
 .ufo-link svg{width:100%;height:100%}
+
+/* ── Game elements ───────────────────────────── */
+#gamecanvas{position:fixed;inset:0;z-index:50;display:none}
+.game-hud{
+  position:fixed;top:12px;left:16px;z-index:51;display:none;
+  font-family:'Courier New',monospace;color:#39ff14;font-size:clamp(.8rem,2vw,1rem);
+  text-shadow:0 0 6px rgba(57,255,20,.5);
+}
+.game-hud div{margin-bottom:4px}
+.game-lives{display:flex;gap:6px;margin-top:4px}
+.game-lives span{font-size:1.2em}
+
+.game-start-btn{
+  margin-top:1.5em;padding:.7em 1.6em;
+  font-family:'Courier New',monospace;font-size:clamp(.85rem,2vw,1.05rem);
+  color:#39ff14;background:rgba(57,255,20,.08);
+  border:1px solid rgba(57,255,20,.4);border-radius:6px;
+  cursor:pointer;text-transform:uppercase;letter-spacing:.08em;
+  animation:btnPulse 3s ease-in-out infinite;
+  transition:background .2s,border-color .2s;
+}
+.game-start-btn:hover{
+  background:rgba(57,255,20,.18);border-color:#39ff14;
+}
+@keyframes btnPulse{0%,100%{box-shadow:0 0 8px rgba(57,255,20,.2)}50%{box-shadow:0 0 20px rgba(57,255,20,.5)}}
+
+.game-overlay{
+  position:fixed;inset:0;z-index:52;display:none;
+  flex-direction:column;justify-content:center;align-items:center;text-align:center;
+  background:rgba(13,13,38,.85);
+  font-family:'Courier New',monospace;color:#E0E8FF;
+}
+.game-overlay h2{font-size:clamp(1.8rem,5vw,3rem);margin:0 0 .3em;color:#39ff14;text-shadow:0 0 12px rgba(57,255,20,.5)}
+.game-overlay p{max-width:36ch;line-height:1.5;font-size:clamp(.85rem,2vw,1.05rem);margin:.3em 0}
+.game-overlay .rank{color:#ffd35c;font-size:clamp(1rem,2.5vw,1.3rem);margin:.6em 0}
+.game-overlay .manifest{
+  text-align:left;font-size:.85rem;max-height:30vh;overflow-y:auto;
+  margin:1em auto;padding:.8em 1.2em;
+  background:rgba(255,255,255,.05);border-radius:6px;max-width:30ch;
+}
+.game-overlay button{
+  margin:.5em;padding:.6em 1.4em;
+  font-family:'Courier New',monospace;font-size:.95rem;
+  border:1px solid;border-radius:6px;cursor:pointer;
+  text-transform:uppercase;letter-spacing:.05em;
+  transition:background .2s;
+}
+.game-overlay .btn-retry{color:#39ff14;background:rgba(57,255,20,.1);border-color:rgba(57,255,20,.5)}
+.game-overlay .btn-retry:hover{background:rgba(57,255,20,.25)}
+.game-overlay .btn-return{color:#E0E8FF;background:rgba(255,255,255,.05);border-color:rgba(255,255,255,.2)}
+.game-overlay .btn-return:hover{background:rgba(255,255,255,.12)}
+
+.game-flavor{
+  position:fixed;top:15%;left:50%;transform:translateX(-50%);z-index:51;
+  font-family:'Courier New',monospace;font-size:clamp(.8rem,2vw,1rem);
+  color:#ffd35c;text-shadow:0 0 8px rgba(255,211,92,.4);
+  pointer-events:none;opacity:0;transition:opacity .3s;
+  text-align:center;max-width:90vw;display:none;
+}
+
+.game-briefing{
+  position:fixed;inset:0;z-index:53;display:none;
+  flex-direction:column;justify-content:center;align-items:center;text-align:center;
+  background:rgba(13,13,38,.9);
+  font-family:'Courier New',monospace;color:#39ff14;
+}
+.game-briefing h3{font-size:clamp(1.2rem,3vw,1.8rem);margin:0 0 .5em;text-shadow:0 0 10px rgba(57,255,20,.5)}
+.game-briefing p{font-size:clamp(.8rem,2vw,1rem);color:#E0E8FF;max-width:32ch;line-height:1.5;margin:.2em 0}
+
+@media(max-width:600px){
+  .game-hud{top:8px;left:10px}
+  .game-overlay .manifest{max-width:85vw}
+}
 </style>
 </head>
 <body>
@@ -87,8 +160,47 @@ footer{margin-top:2em;font-size:.9rem;opacity:.6}
   <p>Our mothership is <span class="blink">parallel-parking</span> in low orbit.<br>
      While we calibrate the tractor beams, please<br>
      <strong>remain calm, hydrate, and avoid probing jokes.</strong></p>
-  <p><em>Fun is coming.</em></p>
+  <p><em id="funText">Fun is coming.</em></p>
   <footer>Transmission ID #42 • Powered by questionable DNS decisions</footer>
+  <button class="game-start-btn" id="startGame" title="Definitely not illegal in this galaxy">INITIATE ABDUCTION PROTOCOL</button>
+</div>
+
+<!-- ── Game HUD ───────────────────────────────── -->
+<canvas id="gamecanvas"></canvas>
+<div class="game-hud" id="gameHud">
+  <div id="scoreDisplay">SPECIMENS: 0</div>
+  <div id="sectorDisplay">SECTOR: 1</div>
+  <div class="game-lives" id="livesDisplay"></div>
+</div>
+<div class="game-flavor" id="gameFlavor"></div>
+
+<!-- ── Briefing overlay ──────────────────────── -->
+<div class="game-briefing" id="gameBriefing">
+  <h3>MISSION BRIEFING</h3>
+  <p>Objective: Acquire Earth specimens.</p>
+  <p>Method: Tractor beam.</p>
+  <p>Legal status: Unclear.</p>
+  <p>Liability: Not ours.</p>
+  <p style="margin-top:.8em;color:#39ff14;font-size:.75rem">[ARROW KEYS / WASD / TOUCH to fly &bull; SPACE / TAP to beam]</p>
+</div>
+
+<!-- ── Game over overlay ─────────────────────── -->
+<div class="game-overlay" id="gameOver">
+  <h2 id="goTitle">MISSION COMPLETE</h2>
+  <p id="goScore"></p>
+  <div class="rank" id="goRank"></div>
+  <div class="manifest" id="goManifest"></div>
+  <div>
+    <button class="btn-retry" id="goRetry">RETRY MISSION</button>
+    <button class="btn-return" id="goReturn">RETURN TO ORBIT</button>
+  </div>
+</div>
+
+<!-- ── Pause overlay ─────────────────────────── -->
+<div class="game-overlay" id="gamePaused">
+  <h2>TRANSMISSION PAUSED</h2>
+  <p>The abductees are getting restless.</p>
+  <p style="font-size:.8rem;opacity:.6;margin-top:1em">[ESC / TAP to resume]</p>
 </div>
 
 <!-- ── Saucer 1 (top) ─────────────────────────── -->
@@ -146,6 +258,7 @@ footer{margin-top:2em;font-size:.9rem;opacity:.6}
   <circle cx="145" cy="60" r="5" fill="#ffd35c"/>
 </svg>
 
+<script src="game.js"></script>
 </body>
 </html>
 
