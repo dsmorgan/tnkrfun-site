@@ -1450,13 +1450,540 @@ function startBreeding(parentA, parentB) {
   renderBreedTab();
 }
 
+/* ── Train Tab ────────────────────────────────── */
+let selectedTrainHorse = null;
+let lastTrainResult = null;
+
+const TRAIN_TYPES = [
+  { stat: 'speed',     name: 'Sprint Drills',     desc: 'Short bursts of maximum speed' },
+  { stat: 'stamina',   name: 'Long Rides',        desc: 'Endurance over distance' },
+  { stat: 'agility',   name: 'Obstacle Courses',  desc: 'Weaving, jumping, quick turns' },
+  { stat: 'strength',  name: 'Weight Training',   desc: 'Pulling and carrying exercises' },
+  { stat: 'obedience', name: 'Groundwork',        desc: 'Commands, patience, trust' },
+];
+
+const TRAIN_QUOTES = {
+  great: [
+    '{name} crushed it! Impressive gains.',
+    '{name} trained like a champion today.',
+    'Exceptional session. {name} is a natural.',
+  ],
+  good: [
+    '{name} had a solid training session.',
+    'Decent progress for {name} today.',
+    '{name} is improving steadily.',
+  ],
+  poor: [
+    '{name} wasn\'t feeling it today. Minimal progress.',
+    '{name} spent most of the session staring at clouds.',
+    'Training was... attempted. {name} had other priorities.',
+  ],
+  capped: [
+    '{name} has reached their natural limit for {stat}. Further training won\'t help.',
+    '{name}\'s {stat} talent is maxed out. Consider focusing elsewhere.',
+  ],
+  unhappy: [
+    '{name} refused to cooperate. Improve happiness first.',
+    '{name} is too unhappy to train effectively.',
+  ],
+};
+
+function getTrainBonus() {
+  // 0 = basic ring, 1 = barn (+1), 2 = pro (+2 and talent hints)
+  return state.upgrades.trainingRing || 0;
+}
+
 function renderTrainTab() {
   const c = $('tab-train');
   c.textContent = '';
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.textContent = 'Training coming in Phase 4. Patience, young rancher.';
-  c.appendChild(el);
+
+  const hdr = document.createElement('h2');
+  hdr.textContent = 'Training';
+  c.appendChild(hdr);
+
+  const sub = document.createElement('p');
+  sub.style.cssText = 'font-size:.8rem;color:var(--text-muted);margin-bottom:12px';
+  sub.textContent = 'Train your horses to improve their stats. Costs 1 energy per session.';
+  c.appendChild(sub);
+
+  const layout = document.createElement('div');
+  layout.className = 'train-layout';
+
+  // Left: horse selector
+  const selectPanel = document.createElement('div');
+  selectPanel.className = 'train-select';
+
+  const selectTitle = document.createElement('h3');
+  selectTitle.style.cssText = 'margin-bottom:8px';
+  selectTitle.textContent = 'Select Horse';
+  selectPanel.appendChild(selectTitle);
+
+  if (state.stable.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No horses to train.';
+    selectPanel.appendChild(empty);
+  } else {
+    state.stable.forEach(horse => {
+      const card = document.createElement('div');
+      card.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:4px;background:var(--bg-card);border-radius:var(--radius);cursor:pointer;border-left:3px solid ' + horse.coat.bodyHex + ';transition:background .15s';
+      if (selectedTrainHorse === horse.id) {
+        card.style.background = 'var(--bg-hover)';
+        card.style.borderLeftColor = 'var(--accent)';
+      }
+
+      const portrait = document.createElement('div');
+      portrait.className = 'horse-portrait';
+      portrait.style.cssText = 'width:36px;height:36px;background:' + portraitBg(horse.coat.bodyHex) + ';flex-shrink:0';
+      portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+      card.appendChild(portrait);
+
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0';
+      const nameLine = document.createElement('div');
+      nameLine.style.cssText = 'font-size:.8rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+      nameLine.textContent = horse.name;
+      info.appendChild(nameLine);
+      const detailLine = document.createElement('div');
+      detailLine.style.cssText = 'font-size:.65rem;color:var(--text-muted)';
+      detailLine.textContent = horse.breedLabel + ' \u2022 ' + horse.sex;
+      info.appendChild(detailLine);
+      card.appendChild(info);
+
+      card.addEventListener('click', () => {
+        selectedTrainHorse = horse.id;
+        lastTrainResult = null;
+        renderTrainTab();
+      });
+      selectPanel.appendChild(card);
+    });
+  }
+  layout.appendChild(selectPanel);
+
+  // Right: training panel
+  const trainPanel = document.createElement('div');
+  trainPanel.className = 'train-panel';
+
+  const horse = selectedTrainHorse ? state.stable.find(h => h.id === selectedTrainHorse) : null;
+
+  if (!horse) {
+    const hint = document.createElement('div');
+    hint.className = 'empty-state';
+    hint.textContent = 'Select a horse to begin training.';
+    trainPanel.appendChild(hint);
+  } else {
+    // Horse name + portrait
+    const horseHeader = document.createElement('div');
+    horseHeader.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:10px';
+
+    const portrait = document.createElement('div');
+    portrait.className = 'horse-portrait';
+    portrait.style.cssText = 'width:56px;height:56px;background:' + portraitBg(horse.coat.bodyHex);
+    portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+    horseHeader.appendChild(portrait);
+
+    const headerInfo = document.createElement('div');
+    const nameEl = document.createElement('div');
+    nameEl.style.cssText = 'font-weight:600;font-size:.95rem';
+    nameEl.textContent = horse.name;
+    headerInfo.appendChild(nameEl);
+    const coatEl = document.createElement('div');
+    coatEl.style.cssText = 'font-size:.75rem;color:var(--gold)';
+    coatEl.textContent = horse.coat.fullName + ' ' + horse.breedLabel;
+    headerInfo.appendChild(coatEl);
+    horseHeader.appendChild(headerInfo);
+    trainPanel.appendChild(horseHeader);
+
+    // Stat bars with talent caps
+    const showTalent = state.upgrades.trainingRing >= 2;
+    const statSection = document.createElement('div');
+    statSection.className = 'stat-bars';
+    statSection.style.marginBottom = '12px';
+
+    for (const [key, def] of Object.entries(STAT_DEFS)) {
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+
+      const label = document.createElement('span');
+      label.className = 'stat-label';
+      label.textContent = def.name;
+
+      const track = document.createElement('div');
+      track.className = 'stat-track';
+      track.style.position = 'relative';
+
+      const fill = document.createElement('div');
+      fill.className = 'stat-fill';
+      fill.style.width = horse.stats[key] + '%';
+      fill.style.background = 'rgb(' + STAT_COLORS[key] + ')';
+      track.appendChild(fill);
+
+      // Talent cap marker (if upgrade unlocked)
+      if (showTalent) {
+        const cap = document.createElement('div');
+        cap.style.cssText = 'position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.4);left:' + horse.talents[key] + '%';
+        cap.title = 'Talent cap: ' + horse.talents[key];
+        track.appendChild(cap);
+      }
+
+      const val = document.createElement('span');
+      val.className = 'stat-val';
+      val.textContent = horse.stats[key] + (showTalent ? '/' + horse.talents[key] : '');
+      val.style.width = showTalent ? '40px' : '20px';
+
+      row.appendChild(label);
+      row.appendChild(track);
+      row.appendChild(val);
+      statSection.appendChild(row);
+    }
+    trainPanel.appendChild(statSection);
+
+    // Training options
+    const optTitle = document.createElement('div');
+    optTitle.style.cssText = 'font-size:.7rem;color:var(--text-muted);margin-bottom:6px';
+    optTitle.textContent = 'CHOOSE TRAINING:';
+    trainPanel.appendChild(optTitle);
+
+    const opts = document.createElement('div');
+    opts.className = 'train-options';
+
+    TRAIN_TYPES.forEach(tt => {
+      const opt = document.createElement('div');
+      opt.className = 'train-option';
+
+      const left = document.createElement('div');
+      const ttName = document.createElement('div');
+      ttName.style.cssText = 'font-size:.85rem;font-weight:600';
+      ttName.textContent = tt.name;
+      left.appendChild(ttName);
+      const ttDesc = document.createElement('div');
+      ttDesc.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
+      ttDesc.textContent = tt.desc + ' \u2192 ' + STAT_DEFS[tt.stat].label;
+      left.appendChild(ttDesc);
+      opt.appendChild(left);
+
+      const pill = document.createElement('span');
+      pill.className = 'pill pill-' + tt.stat;
+      pill.textContent = STAT_DEFS[tt.stat].name + ' ' + horse.stats[tt.stat];
+      opt.appendChild(pill);
+
+      const disabled = state.energy < 1;
+      if (disabled) opt.style.opacity = '0.4';
+
+      opt.addEventListener('click', () => {
+        if (disabled) return;
+        doTraining(horse, tt.stat);
+      });
+
+      opts.appendChild(opt);
+    });
+    trainPanel.appendChild(opts);
+
+    if (state.energy < 1) {
+      const warn = document.createElement('div');
+      warn.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:8px';
+      warn.textContent = 'Not enough energy. End the day to restore.';
+      trainPanel.appendChild(warn);
+    }
+
+    // Last training result
+    if (lastTrainResult) {
+      const result = document.createElement('div');
+      result.className = 'train-result';
+      result.textContent = lastTrainResult;
+      trainPanel.appendChild(result);
+    }
+
+    // Competition section
+    renderCompetitions(trainPanel, horse);
+  }
+
+  layout.appendChild(trainPanel);
+  c.appendChild(layout);
+}
+
+function doTraining(horse, statKey) {
+  if (state.energy < 1) return;
+  state.energy--;
+
+  const talent = horse.talents[statKey];
+  const current = horse.stats[statKey];
+
+  // Check if at cap
+  if (current >= talent) {
+    const quote = pick(TRAIN_QUOTES.capped).replace('{name}', horse.name).replace('{stat}', STAT_DEFS[statKey].label);
+    lastTrainResult = quote;
+    state.eventLog = quote;
+    saveState();
+    renderHeader();
+    renderTrainTab();
+    return;
+  }
+
+  // Check happiness
+  if (horse.happiness < 15) {
+    const quote = pick(TRAIN_QUOTES.unhappy).replace('{name}', horse.name);
+    lastTrainResult = quote;
+    state.eventLog = quote;
+    saveState();
+    renderHeader();
+    renderTrainTab();
+    return;
+  }
+
+  // Calculate gain
+  const facilityBonus = getTrainBonus();
+  const headroom = talent - current;
+  const diminishing = Math.max(0.3, headroom / talent); // less gain near cap
+  const happinessMulti = horse.happiness > 60 ? 1.0 : horse.happiness > 30 ? 0.7 : 0.4;
+  const youngBonus = horse.age < 3 ? 1.3 : 1.0;
+  const weatherBonus = hasActiveEvent('goodWeather') ? 1.3 : 1.0;
+
+  let baseGain = randRange(1, 3) + facilityBonus;
+  let gain = Math.max(1, Math.round(baseGain * diminishing * happinessMulti * youngBonus * weatherBonus));
+  gain = Math.min(gain, headroom); // don't exceed talent
+
+  horse.stats[statKey] = current + gain;
+
+  // Happiness cost for overtraining same stat
+  if (horse.lastTrainedStat === statKey) {
+    horse.trainStreak++;
+    if (horse.trainStreak >= 3) {
+      horse.happiness = clamp(horse.happiness - 5, 0, 100);
+    }
+  } else {
+    horse.trainStreak = 1;
+  }
+  horse.lastTrainedStat = statKey;
+
+  // Result message
+  let quality;
+  if (gain >= 3) quality = 'great';
+  else if (gain >= 2) quality = 'good';
+  else quality = 'poor';
+
+  const quote = pick(TRAIN_QUOTES[quality]).replace('{name}', horse.name);
+  lastTrainResult = quote + ' (+' + gain + ' ' + STAT_DEFS[statKey].label + ', now ' + horse.stats[statKey] + ')';
+  state.eventLog = lastTrainResult;
+
+  saveState();
+  renderHeader();
+  renderTrainTab();
+}
+
+/* ── Competitions ─────────────────────────────── */
+function renderCompetitions(container, horse) {
+  const section = document.createElement('div');
+  section.style.cssText = 'margin-top:16px;padding-top:12px;border-top:1px solid var(--border)';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin-bottom:8px';
+  title.textContent = 'Compete';
+  section.appendChild(title);
+
+  if (horse.competeCooldown > 0) {
+    const cd = document.createElement('div');
+    cd.style.cssText = 'font-size:.8rem;color:var(--text-muted)';
+    cd.textContent = horse.name + ' already competed today. Available tomorrow.';
+    section.appendChild(cd);
+    container.appendChild(section);
+    return;
+  }
+
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:.75rem;color:var(--text-muted);margin-bottom:8px';
+  sub.textContent = 'Enter an event (1 energy). Win money and reputation!';
+  section.appendChild(sub);
+
+  for (const [key, evt] of Object.entries(EVENTS)) {
+    if (state.reputation < evt.repRequired) continue;
+
+    const card = document.createElement('div');
+    card.className = 'train-option';
+
+    const left = document.createElement('div');
+    const eName = document.createElement('div');
+    eName.style.cssText = 'font-size:.85rem;font-weight:600';
+    eName.textContent = evt.name;
+    left.appendChild(eName);
+
+    const eDesc = document.createElement('div');
+    eDesc.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
+    if (evt.primary && evt.secondary) {
+      eDesc.textContent = STAT_DEFS[evt.primary].label + ' + ' + STAT_DEFS[evt.secondary].label + ' \u2022 Prize: $' + evt.prize[0] + '-' + evt.prize[1];
+    } else {
+      eDesc.textContent = 'All stats \u2022 Prize: $' + evt.prize[0] + '-' + evt.prize[1];
+    }
+    left.appendChild(eDesc);
+    card.appendChild(left);
+
+    // Show horse's relevant score
+    const score = computeEventScore(horse, evt);
+    const pill = document.createElement('span');
+    pill.style.cssText = 'font-family:"Courier New",monospace;font-size:.75rem;color:var(--gold)';
+    pill.textContent = 'Power: ' + score;
+    card.appendChild(pill);
+
+    const disabled = state.energy < 1;
+    if (disabled) card.style.opacity = '0.4';
+
+    card.addEventListener('click', () => {
+      if (disabled) return;
+      doCompetition(horse, key, evt);
+    });
+
+    section.appendChild(card);
+  }
+
+  if (state.energy < 1) {
+    const warn = document.createElement('div');
+    warn.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:6px';
+    warn.textContent = 'Not enough energy.';
+    section.appendChild(warn);
+  }
+
+  container.appendChild(section);
+}
+
+function computeEventScore(horse, evt) {
+  if (!evt.primary) {
+    // Grand Prix: average all stats
+    const total = Object.values(horse.stats).reduce((s, v) => s + v, 0);
+    return Math.round(total / Object.keys(STAT_DEFS).length);
+  }
+  return Math.round(horse.stats[evt.primary] * 0.7 + horse.stats[evt.secondary] * 0.3);
+}
+
+function doCompetition(horse, eventKey, evt) {
+  if (state.energy < 1) return;
+  state.energy--;
+  horse.competeCooldown = 1;
+
+  const score = computeEventScore(horse, evt);
+  // Add randomness (±15%)
+  const finalScore = Math.round(score * (0.85 + Math.random() * 0.3));
+
+  // AI competitors scale with reputation
+  const repTier = Math.floor(state.reputation / 150) + 1;
+  const numCompetitors = 4;
+  const aiScores = [];
+  for (let i = 0; i < numCompetitors; i++) {
+    const base = 25 + repTier * 12 + randRange(-10, 15);
+    aiScores.push(Math.round(base * (0.85 + Math.random() * 0.3)));
+  }
+  aiScores.sort((a, b) => b - a);
+
+  // Determine placement
+  let placement = 1;
+  for (const ai of aiScores) {
+    if (ai > finalScore) placement++;
+  }
+
+  // Prize calculation
+  let prizeMoney = 0;
+  let repGain = 0;
+  const prizeRange = evt.prize[1] - evt.prize[0];
+
+  if (placement === 1) {
+    prizeMoney = evt.prize[1];
+    repGain = evt.repGain * 2;
+  } else if (placement === 2) {
+    prizeMoney = Math.round(evt.prize[0] + prizeRange * 0.5);
+    repGain = evt.repGain;
+  } else if (placement === 3) {
+    prizeMoney = evt.prize[0];
+    repGain = Math.round(evt.repGain * 0.5);
+  }
+  // 4th and 5th get nothing
+
+  state.money += prizeMoney;
+  state.reputation += repGain;
+
+  // Happiness boost for competing
+  horse.happiness = clamp(horse.happiness + 3, 0, 100);
+
+  // Build result
+  const ordinal = ['1st', '2nd', '3rd', '4th', '5th'][placement - 1];
+  const allScores = [...aiScores, finalScore].sort((a, b) => b - a);
+
+  // Show result modal
+  const modal = document.createElement('div');
+
+  const title = document.createElement('h2');
+  title.style.color = placement <= 3 ? 'var(--gold)' : 'var(--text-muted)';
+  title.textContent = evt.name + ' Results';
+  modal.appendChild(title);
+
+  const placementEl = document.createElement('div');
+  placementEl.style.cssText = 'font-size:1.2rem;font-weight:700;margin:8px 0;font-family:"Courier New",monospace';
+  placementEl.style.color = placement === 1 ? 'var(--gold)' : placement <= 3 ? 'var(--accent)' : 'var(--text-muted)';
+  placementEl.textContent = horse.name + ' placed ' + ordinal + '!';
+  modal.appendChild(placementEl);
+
+  // Scoreboard
+  const board = document.createElement('div');
+  board.style.cssText = 'font-family:"Courier New",monospace;font-size:.8rem;margin:10px 0';
+  const competitors = ['Rival Horse A', 'Rival Horse B', 'Rival Horse C', 'Rival Horse D'];
+  let aiIdx = 0;
+  allScores.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:3px 0;display:flex;justify-content:space-between';
+    const isPlayer = s === finalScore && !row.dataset.playerShown;
+    if (isPlayer) {
+      row.style.color = 'var(--gold)';
+      row.style.fontWeight = '600';
+      row.dataset.playerShown = 'true';
+    }
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = (i + 1) + '. ' + (s === finalScore && !board.dataset.playerShown ? horse.name : competitors[aiIdx++] || 'Rival');
+    if (s === finalScore && !board.dataset.playerShown) board.dataset.playerShown = 'true';
+    const scoreSpan = document.createElement('span');
+    scoreSpan.textContent = s + ' pts';
+    row.appendChild(nameSpan);
+    row.appendChild(scoreSpan);
+    board.appendChild(row);
+  });
+  modal.appendChild(board);
+
+  // Prize
+  if (prizeMoney > 0 || repGain > 0) {
+    const prize = document.createElement('div');
+    prize.style.cssText = 'font-size:.85rem;color:var(--accent);margin-top:8px';
+    let prizeText = '';
+    if (prizeMoney > 0) prizeText += '+$' + prizeMoney;
+    if (repGain > 0) prizeText += (prizeText ? ' \u2022 ' : '') + '+' + repGain + ' Rep';
+    prize.textContent = prizeText;
+    modal.appendChild(prize);
+  } else {
+    const noPrize = document.createElement('div');
+    noPrize.style.cssText = 'font-size:.85rem;color:var(--text-muted);margin-top:8px';
+    noPrize.textContent = 'No prize for ' + ordinal + ' place. Better luck next time.';
+    modal.appendChild(noPrize);
+  }
+
+  // Flavor
+  const flavor = document.createElement('div');
+  flavor.style.cssText = 'font-size:.8rem;font-style:italic;color:var(--text-muted);margin-top:10px';
+  if (placement === 1) flavor.textContent = 'The crowd goes wild! ' + horse.name + ' is a champion!';
+  else if (placement === 2) flavor.textContent = 'A strong showing. ' + horse.name + ' was close to the top.';
+  else if (placement === 3) flavor.textContent = horse.name + ' squeezed onto the podium. Not bad.';
+  else flavor.textContent = horse.name + ' gave it their all. The crowd went mild.';
+  modal.appendChild(flavor);
+
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary';
+  btn.style.marginTop = '12px';
+  btn.textContent = 'OK';
+  btn.addEventListener('click', () => {
+    hideModal();
+    state.eventLog = horse.name + ' placed ' + ordinal + ' in ' + evt.name + (prizeMoney > 0 ? ' (+$' + prizeMoney + ')' : '') + '.';
+    saveState();
+    renderHeader();
+    renderTrainTab();
+  });
+  modal.appendChild(btn);
+
+  showModal(modal);
 }
 
 /* ── Explore Tab ──────────────────────────────── */
