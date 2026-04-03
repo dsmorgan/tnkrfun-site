@@ -49,6 +49,68 @@ footer{margin-top:2em;font-size:.9rem;opacity:.6}
 .ufo-link{display:block;width:200px;height:120px;text-decoration:none;}
 .ufo-link svg{width:100%;height:100%}
 
+/* ── UFO Menu ────────────────────────────────── */
+.ufo--low{cursor:pointer}
+.ufo-menu{
+  position:fixed;z-index:25;
+  pointer-events:none;opacity:0;
+  /* positioned by JS at the UFO, then animated to final spot */
+}
+.ufo-menu.animating{
+  animation:ufoMenuIn .7s cubic-bezier(.22,.68,.36,1.1) forwards;
+}
+.ufo-menu.open{
+  pointer-events:auto;opacity:1;
+}
+.ufo-menu.closing{
+  pointer-events:none;
+  animation:ufoMenuOut .5s cubic-bezier(.6,0,.7,.2) forwards;
+}
+.ufo-menu-panel{
+  background:rgba(13,13,38,.92);
+  border:1px solid rgba(173,216,255,.25);
+  border-radius:10px;
+  padding:14px 18px;
+  backdrop-filter:blur(8px);
+  box-shadow:0 0 30px rgba(173,216,255,.1),0 4px 20px rgba(0,0,0,.5);
+  min-width:180px;
+}
+.ufo-menu-title{
+  font-family:'Courier New',monospace;
+  font-size:.65rem;letter-spacing:.12em;
+  color:rgba(173,216,255,.5);text-transform:uppercase;
+  margin-bottom:10px;
+}
+.ufo-menu-item{
+  display:block;
+  padding:8px 12px;margin:0 -8px;
+  border-radius:6px;
+  font-family:'Courier New',monospace;
+  font-size:.85rem;color:#E0E8FF;
+  text-decoration:none;
+  transition:background .15s,color .15s;
+}
+.ufo-menu-item:hover{
+  background:rgba(57,255,20,.1);
+  color:#39ff14;
+}
+.ufo-menu-item .menu-icon{margin-right:6px}
+.ufo-menu-backdrop{
+  position:fixed;inset:0;z-index:24;
+  display:none;
+}
+.ufo-menu-backdrop.open{display:block}
+
+/* glow dot that travels the arc path */
+.ufo-tracer{
+  position:fixed;z-index:25;
+  width:6px;height:6px;border-radius:50%;
+  background:#b9e3ff;
+  box-shadow:0 0 8px 2px rgba(173,216,255,.6);
+  pointer-events:none;opacity:0;
+  offset-rotate:0deg;
+}
+
 /* ── Game elements ───────────────────────────── */
 #gamecanvas{position:fixed;inset:0;z-index:50;display:none}
 .game-hud{
@@ -241,9 +303,8 @@ footer{margin-top:2em;font-size:.9rem;opacity:.6}
 </svg>
 </a>
 
-<!-- ── Saucer 3 (low, secret link to breeder) ── -->
-<a href="/breeder/" class="ufo ufo--low ufo-link" aria-label="Hidden game" style="z-index:15">
-<svg viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
+<!-- ── Saucer 3 (low, opens menu) ─────────────── -->
+<svg class="ufo ufo--low" id="ufoMenu" viewBox="0 0 200 120" xmlns="http://www.w3.org/2000/svg">
   <defs><linearGradient id="gradLow" x1=".5" y1="0" x2=".5" y2="1">
     <stop offset="0%" stop-color="rgba(173,216,255,0)"/>
     <stop offset="80%" stop-color="rgba(173,216,255,0.35)"/>
@@ -258,7 +319,145 @@ footer{margin-top:2em;font-size:.9rem;opacity:.6}
   <circle cx="117" cy="67" r="5" fill="#ffd35c"/>
   <circle cx="145" cy="60" r="5" fill="#ffd35c"/>
 </svg>
-</a>
+
+<!-- ── UFO Menu (flies out from saucer on arc) ── -->
+<div class="ufo-menu-backdrop" id="ufoMenuBackdrop"></div>
+<div class="ufo-tracer" id="ufoTracer"></div>
+<div class="ufo-menu" id="ufoMenuPanel">
+  <div class="ufo-menu-panel">
+    <div class="ufo-menu-title">Transmissions</div>
+    <a href="/breeder/" class="ufo-menu-item"><span class="menu-icon">&#x1F40E;</span>Horse Breeder</a>
+  </div>
+</div>
+
+<script>
+(()=>{
+  const ufo=_('ufoMenu'),menu=_('ufoMenuPanel'),backdrop=_('ufoMenuBackdrop'),tracer=_('ufoTracer');
+  let isOpen=false,animId=null;
+
+  // Get the UFO center (accounts for its hover animation)
+  function ufoCenter(){
+    const r=ufo.getBoundingClientRect();
+    return{x:r.left+r.width/2, y:r.top+r.height/2};
+  }
+
+  // Final menu position: on top of the "Initiate Abduction Protocol" button
+  function menuTarget(){
+    const btn=document.getElementById('startGame');
+    if(btn){
+      const r=btn.getBoundingClientRect();
+      return{x:r.left+r.width/2, y:r.top+r.height/2};
+    }
+    return{x:innerWidth/2, y:innerHeight/2};
+  }
+
+  // Cubic bezier point on arc: UFO -> swing wide -> final position
+  function arcPoint(t, p0, p1, p2, p3){
+    const u=1-t;
+    return{
+      x:u*u*u*p0.x + 3*u*u*t*p1.x + 3*u*t*t*p2.x + t*t*t*p3.x,
+      y:u*u*u*p0.y + 3*u*u*t*p1.y + 3*u*t*t*p2.y + t*t*t*p3.y,
+    };
+  }
+
+  function animate(from,to,duration,easing,onFrame,onDone){
+    const start=performance.now();
+    function step(now){
+      let t=(now-start)/duration;
+      if(t>1)t=1;
+      const et=easing(t);
+      onFrame(et,t);
+      if(t<1) animId=requestAnimationFrame(step);
+      else if(onDone) onDone();
+    }
+    animId=requestAnimationFrame(step);
+  }
+
+  // Easing: ease-out back
+  function easeOutBack(t){const c=1.4;return 1+c*Math.pow(t-1,3)+c*Math.pow(t-1,2);}
+  // Easing: ease-in
+  function easeIn(t){return t*t*t;}
+
+  function openMenu(e){
+    e.preventDefault();e.stopPropagation();
+    if(isOpen)return;
+    isOpen=true;
+    if(animId)cancelAnimationFrame(animId);
+
+    const src=ufoCenter();
+    const dst=menuTarget();
+
+    // Control points for a wide sweeping arc — swings far left and up
+    const dx=dst.x-src.x, dy=dst.y-src.y;
+    const cp1={x:src.x-Math.abs(dx)*0.6, y:src.y-Math.abs(dy)*0.8};
+    const cp2={x:dst.x-Math.abs(dx)*0.5, y:dst.y+Math.abs(dy)*0.4};
+
+    backdrop.classList.add('open');
+
+    // Show tracer dot traveling the arc first
+    tracer.style.opacity='1';
+    animate(src,dst,400,function(t){return t;},function(et){
+      const p=arcPoint(et,src,cp1,cp2,dst);
+      tracer.style.left=p.x-3+'px';
+      tracer.style.top=p.y-3+'px';
+      tracer.style.opacity=String(0.3+0.7*(1-Math.abs(et-0.5)*2));
+    },function(){
+      tracer.style.opacity='0';
+      // Now grow the menu at the destination
+      const mw=menu.offsetWidth||200,mh=menu.offsetHeight||80;
+      menu.style.left=dst.x-mw/2+'px';
+      menu.style.top=dst.y-mh/2+'px';
+      menu.style.transform='scale(0.1)';
+      menu.style.opacity='0';
+      menu.classList.add('open');
+      // Animate scale up
+      animate(null,null,350,easeOutBack,function(et){
+        menu.style.transform='scale('+et+')';
+        menu.style.opacity=String(Math.min(1,et*2));
+      },null);
+    });
+  }
+
+  function closeMenu(){
+    if(!isOpen)return;
+    isOpen=false;
+    if(animId)cancelAnimationFrame(animId);
+
+    const dst=ufoCenter();
+    const src=menuTarget();
+    const dx=dst.x-src.x, dy=dst.y-src.y;
+    const cp1={x:src.x+Math.abs(dx)*0.5, y:src.y+Math.abs(dy)*0.4};
+    const cp2={x:dst.x+Math.abs(dx)*0.6, y:dst.y-Math.abs(dy)*0.6};
+
+    // Shrink menu
+    animate(null,null,250,easeIn,function(et){
+      const s=1-et;
+      menu.style.transform='scale('+s+')';
+      menu.style.opacity=String(s);
+    },function(){
+      menu.classList.remove('open');
+      menu.style.transform='scale(0)';
+      menu.style.opacity='0';
+
+      // Tracer flies back to UFO on reverse arc
+      tracer.style.opacity='1';
+      animate(src,dst,350,function(t){return t;},function(et){
+        const p=arcPoint(et,src,cp1,cp2,dst);
+        tracer.style.left=p.x-3+'px';
+        tracer.style.top=p.y-3+'px';
+        tracer.style.opacity=String(0.8*(1-et));
+      },function(){
+        tracer.style.opacity='0';
+        backdrop.classList.remove('open');
+      });
+    });
+  }
+
+  ufo.addEventListener('click',openMenu);
+  backdrop.addEventListener('click',closeMenu);
+  function _(id){return document.getElementById(id)}
+})();
+</script>
 
 <script src="game.js"></script>
 </body>
