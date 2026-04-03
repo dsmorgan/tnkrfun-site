@@ -468,6 +468,16 @@ function endDay() {
     }
   });
 
+  // Rotate buyers: expire old ones, add new
+  state.buyers = state.buyers.filter(b => {
+    b.daysLeft--;
+    return b.daysLeft > 0;
+  });
+  const maxBuyers = state.maxBuyers + (hasActiveEvent('buyerRush') ? 2 : 0);
+  while (state.buyers.length < maxBuyers) {
+    state.buyers.push(generateBuyer());
+  }
+
   // Active events tick down
   state.activeEvents = state.activeEvents.filter(e => {
     e.daysLeft--;
@@ -2325,13 +2335,346 @@ function showCatchResult(success, horse) {
   c.appendChild(panel);
 }
 
+/* ── Market Tab ───────────────────────────────── */
+let selectedBuyer = null;
+
+// Coat color names for buyer requests
+const REQUESTABLE_COLORS = ['Bay', 'Black', 'Chestnut', 'Palomino', 'Buckskin', 'Grey', 'Cremello', 'Perlino', 'Bay Dun', 'Grullo', 'Red Dun'];
+const REQUESTABLE_STATS = ['speed', 'stamina', 'agility', 'strength', 'obedience'];
+
+function getBuyerTier() {
+  if (state.reputation >= 600) return 4;
+  if (state.reputation >= 300) return 3;
+  if (state.reputation >= 100) return 2;
+  return 1;
+}
+
+function generateBuyer() {
+  const tier = getBuyerTier();
+  const isCelebrity = hasActiveEvent('celebrity') && Math.random() < 0.5;
+  const numRequirements = Math.min(1 + Math.floor(tier * 0.7), 3) + (isCelebrity ? 1 : 0);
+
+  const requirements = [];
+  const usedTypes = new Set();
+
+  for (let i = 0; i < numRequirements; i++) {
+    // Pick a requirement type we haven't used yet
+    const types = ['color', 'stat', 'breed'].filter(t => !usedTypes.has(t));
+    if (types.length === 0) break;
+    const type = pick(types);
+    usedTypes.add(type);
+
+    if (type === 'color') {
+      requirements.push({ type: 'color', value: pick(REQUESTABLE_COLORS) });
+    } else if (type === 'stat') {
+      const stat = pick(REQUESTABLE_STATS);
+      const threshold = 30 + tier * 10 + randRange(0, 15);
+      requirements.push({ type: 'stat', stat, threshold });
+    } else if (type === 'breed') {
+      const breedKey = pick(Object.keys(BREEDS));
+      requirements.push({ type: 'breed', value: breedKey, label: BREEDS[breedKey].name });
+    }
+  }
+
+  const basePrice = 50 + tier * 40 + numRequirements * 30 + randRange(0, 30);
+
+  return {
+    id: uid(),
+    name: pick(BUYER_NAMES),
+    quote: pick(BUYER_QUOTES),
+    requirements,
+    basePrice: isCelebrity ? basePrice * 3 : basePrice,
+    daysLeft: 2 + tier + randRange(0, 2),
+    isCelebrity,
+    tier,
+  };
+}
+
+function matchBuyer(horse, buyer) {
+  let matched = 0;
+  const total = buyer.requirements.length;
+  const details = [];
+
+  buyer.requirements.forEach(req => {
+    let met = false;
+    if (req.type === 'color') {
+      met = horse.coat.fullName.includes(req.value) || horse.coat.colorName === req.value;
+      details.push({ label: req.value, met });
+    } else if (req.type === 'stat') {
+      met = horse.stats[req.stat] >= req.threshold;
+      details.push({ label: STAT_DEFS[req.stat].label + ' \u2265' + req.threshold, met });
+    } else if (req.type === 'breed') {
+      met = horse.breed === req.value || horse.breedLabel.includes(req.label);
+      details.push({ label: req.label, met });
+    }
+    if (met) matched++;
+  });
+
+  if (matched === 0) return null; // can't sell if no matches at all
+
+  const multiplier = matched === total ? 1.5 : matched / total;
+  const price = Math.round(buyer.basePrice * multiplier);
+
+  return { matched, total, price, details };
+}
+
 function renderMarketTab() {
   const c = $('tab-market');
   c.textContent = '';
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.textContent = 'Market coming in Phase 5. Build your herd first!';
-  c.appendChild(el);
+
+  const hdr = document.createElement('h2');
+  hdr.textContent = 'Market';
+  c.appendChild(hdr);
+
+  // Seed initial buyers if empty (first visit)
+  if (state.buyers.length === 0) {
+    const maxBuyers = state.maxBuyers + (hasActiveEvent('buyerRush') ? 2 : 0);
+    while (state.buyers.length < maxBuyers) {
+      state.buyers.push(generateBuyer());
+    }
+    saveState();
+  }
+
+  const sub = document.createElement('p');
+  sub.style.cssText = 'font-size:.8rem;color:var(--text-muted);margin-bottom:12px';
+  sub.textContent = 'Buyers are looking for horses with specific traits. Match their requirements to sell at the best price.';
+  c.appendChild(sub);
+
+  // Buyer cards
+  const buyerTitle = document.createElement('h3');
+  buyerTitle.style.cssText = 'margin-bottom:8px';
+  buyerTitle.textContent = 'Buyers (' + state.buyers.length + ')';
+  c.appendChild(buyerTitle);
+
+  const buyerGrid = document.createElement('div');
+  buyerGrid.className = 'buyer-cards';
+
+  state.buyers.forEach(buyer => {
+    const card = document.createElement('div');
+    card.className = 'buyer-card';
+    if (selectedBuyer === buyer.id) card.classList.add('selected');
+    if (buyer.isCelebrity) card.style.borderLeftColor = 'var(--accent)';
+
+    const nameRow = document.createElement('div');
+    nameRow.className = 'buyer-name';
+    nameRow.textContent = (buyer.isCelebrity ? '\u2B50 ' : '') + buyer.name;
+    card.appendChild(nameRow);
+
+    // Requirements as pills
+    const reqRow = document.createElement('div');
+    reqRow.className = 'pills';
+    reqRow.style.margin = '6px 0';
+    buyer.requirements.forEach(req => {
+      const pill = document.createElement('span');
+      pill.style.cssText = 'display:inline-block;padding:2px 7px;border-radius:10px;font-size:.65rem;font-family:"Courier New",monospace;background:rgba(255,211,92,.1);color:var(--gold);border:1px solid rgba(255,211,92,.25)';
+      if (req.type === 'color') pill.textContent = req.value;
+      else if (req.type === 'stat') pill.textContent = STAT_DEFS[req.stat].label + ' \u2265' + req.threshold;
+      else if (req.type === 'breed') pill.textContent = req.label;
+      reqRow.appendChild(pill);
+    });
+    card.appendChild(reqRow);
+
+    const priceRow = document.createElement('div');
+    priceRow.className = 'buyer-price';
+    priceRow.textContent = 'Pays up to $' + buyer.basePrice + (buyer.requirements.length > 1 ? ' (full match)' : '');
+    card.appendChild(priceRow);
+
+    const timer = document.createElement('div');
+    timer.className = 'buyer-timer';
+    timer.textContent = buyer.daysLeft + ' day' + (buyer.daysLeft !== 1 ? 's' : '') + ' remaining';
+    card.appendChild(timer);
+
+    card.addEventListener('click', () => {
+      selectedBuyer = selectedBuyer === buyer.id ? null : buyer.id;
+      renderMarketTab();
+    });
+
+    buyerGrid.appendChild(card);
+  });
+  c.appendChild(buyerGrid);
+
+  // Matching horses (if a buyer is selected)
+  if (selectedBuyer) {
+    const buyer = state.buyers.find(b => b.id === selectedBuyer);
+    if (buyer) {
+      renderMatchingHorses(c, buyer);
+    }
+  }
+}
+
+function renderMatchingHorses(container, buyer) {
+  const section = document.createElement('div');
+  section.style.cssText = 'margin-top:16px';
+
+  const title = document.createElement('h3');
+  title.style.cssText = 'margin-bottom:8px';
+  title.textContent = 'Your Matching Horses for ' + buyer.name;
+  section.appendChild(title);
+
+  // Score all horses against this buyer
+  const matches = [];
+  state.stable.forEach(horse => {
+    const match = matchBuyer(horse, buyer);
+    if (match) matches.push({ horse, match });
+  });
+
+  // Sort by match quality (most matched first, then by price)
+  matches.sort((a, b) => b.match.matched - a.match.matched || b.match.price - a.match.price);
+
+  if (matches.length === 0) {
+    const empty = document.createElement('div');
+    empty.style.cssText = 'font-size:.85rem;color:var(--text-muted);padding:12px';
+    empty.textContent = 'None of your horses match this buyer\'s requirements.';
+    section.appendChild(empty);
+  } else {
+    matches.forEach(({ horse, match }) => {
+      const card = document.createElement('div');
+      card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;margin-bottom:6px;background:var(--bg-card);border-radius:var(--radius);border-left:3px solid ' + (match.matched === match.total ? 'var(--gold)' : 'var(--border)');
+
+      const portrait = document.createElement('div');
+      portrait.className = 'horse-portrait';
+      portrait.style.cssText = 'width:48px;height:48px;background:' + portraitBg(horse.coat.bodyHex) + ';flex-shrink:0';
+      portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+      card.appendChild(portrait);
+
+      const info = document.createElement('div');
+      info.style.cssText = 'flex:1;min-width:0';
+
+      const nameLine = document.createElement('div');
+      nameLine.style.cssText = 'font-size:.85rem;font-weight:600';
+      nameLine.textContent = horse.name;
+      info.appendChild(nameLine);
+
+      const detailLine = document.createElement('div');
+      detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
+      detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex;
+      info.appendChild(detailLine);
+
+      // Match details
+      const matchRow = document.createElement('div');
+      matchRow.style.cssText = 'display:flex;gap:4px;margin-top:4px;flex-wrap:wrap';
+      match.details.forEach(d => {
+        const pill = document.createElement('span');
+        pill.style.cssText = 'font-size:.6rem;padding:1px 5px;border-radius:8px;font-family:"Courier New",monospace;' +
+          (d.met ? 'background:rgba(57,255,20,.1);color:var(--accent);border:1px solid rgba(57,255,20,.25)' :
+                   'background:rgba(255,68,68,.08);color:var(--red);border:1px solid rgba(255,68,68,.2);text-decoration:line-through');
+        pill.textContent = d.label;
+        matchRow.appendChild(pill);
+      });
+      info.appendChild(matchRow);
+
+      card.appendChild(info);
+
+      // Match score + price
+      const rightCol = document.createElement('div');
+      rightCol.style.cssText = 'text-align:right;flex-shrink:0';
+
+      const matchIndicator = document.createElement('div');
+      matchIndicator.className = 'match-indicator';
+      matchIndicator.textContent = match.matched + '/' + match.total;
+      if (match.matched === match.total) matchIndicator.style.cssText += ';background:rgba(255,211,92,.15);color:var(--gold);border:1px solid rgba(255,211,92,.3)';
+      rightCol.appendChild(matchIndicator);
+
+      const price = document.createElement('div');
+      price.style.cssText = 'font-family:"Courier New",monospace;font-size:.9rem;color:var(--gold);margin-top:4px';
+      price.textContent = '$' + match.price;
+      rightCol.appendChild(price);
+
+      const sellBtn = document.createElement('button');
+      sellBtn.className = 'btn btn-gold';
+      sellBtn.style.cssText = 'margin-top:6px;font-size:.7rem;padding:3px 10px';
+      sellBtn.textContent = 'SELL';
+
+      // Don't allow selling pregnant mares
+      if (isPregnantMare(horse)) {
+        sellBtn.disabled = true;
+        sellBtn.className = 'btn btn-muted';
+        sellBtn.textContent = 'Pregnant';
+      }
+
+      sellBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (isPregnantMare(horse)) return;
+        doSale(horse, buyer, match);
+      });
+      rightCol.appendChild(sellBtn);
+
+      card.appendChild(rightCol);
+      section.appendChild(card);
+    });
+  }
+
+  container.appendChild(section);
+}
+
+function doSale(horse, buyer, match) {
+  // Confirm
+  const perfect = match.matched === match.total;
+  const msg = 'Sell ' + horse.name + ' to ' + buyer.name + ' for $' + match.price + (perfect ? ' (PERFECT match!)' : '') + '? This cannot be undone.';
+  if (!confirm(msg)) return;
+
+  // Execute sale
+  state.money += match.price;
+  state.reputation += perfect ? 15 : 5;
+  state.stable = state.stable.filter(h => h.id !== horse.id);
+
+  // Remove buyer (they got what they wanted)
+  state.buyers = state.buyers.filter(b => b.id !== buyer.id);
+  selectedBuyer = null;
+
+  // Track first sale
+  if (!state.flags.firstSale) {
+    state.flags.firstSale = true;
+  }
+
+  state.eventLog = 'Sold ' + horse.name + ' to ' + buyer.name + ' for $' + match.price + '!' + (perfect ? ' Perfect match bonus!' : '');
+
+  // Show sale modal
+  const modal = document.createElement('div');
+
+  const title = document.createElement('h2');
+  title.style.color = 'var(--gold)';
+  title.textContent = perfect ? 'PERFECT SALE!' : 'Horse Sold!';
+  modal.appendChild(title);
+
+  const detail = document.createElement('p');
+  detail.style.cssText = 'font-size:.9rem;margin:8px 0';
+  detail.textContent = horse.name + ' goes to ' + buyer.name + '.';
+  modal.appendChild(detail);
+
+  const priceEl = document.createElement('div');
+  priceEl.style.cssText = 'font-size:1.3rem;font-weight:700;color:var(--gold);font-family:"Courier New",monospace;margin:10px 0';
+  priceEl.textContent = '+$' + match.price;
+  modal.appendChild(priceEl);
+
+  const repEl = document.createElement('div');
+  repEl.style.cssText = 'font-size:.85rem;color:var(--accent)';
+  repEl.textContent = '+' + (perfect ? 15 : 5) + ' Reputation';
+  modal.appendChild(repEl);
+
+  // Buyer quote
+  const quoteText = buyer.quote
+    .replace('{color}', horse.coat.colorName || horse.coat.fullName)
+    .replace('{breed}', horse.breedLabel)
+    .replace('{stat}', match.details.length > 0 ? match.details[0].label : 'something special');
+  const quote = document.createElement('div');
+  quote.style.cssText = 'font-size:.8rem;font-style:italic;color:var(--text-muted);margin-top:12px;padding:8px;background:var(--bg-card);border-radius:var(--radius)';
+  quote.textContent = '"' + quoteText + '" — ' + buyer.name;
+  modal.appendChild(quote);
+
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary';
+  btn.style.marginTop = '14px';
+  btn.textContent = 'CONTINUE';
+  btn.addEventListener('click', () => {
+    hideModal();
+    saveState();
+    renderHeader();
+    renderMarketTab();
+  });
+  modal.appendChild(btn);
+
+  showModal(modal);
 }
 
 function renderUpgradesTab() {
