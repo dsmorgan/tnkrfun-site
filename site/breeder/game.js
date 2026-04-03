@@ -2677,13 +2677,146 @@ function doSale(horse, buyer, match) {
   showModal(modal);
 }
 
+/* ── Upgrades Tab ─────────────────────────────── */
+const UPGRADE_CATEGORIES = {
+  equipment:  { label: 'Equipment',  icon: '\uD83D\uDEE0' },
+  facility:   { label: 'Facility',   icon: '\uD83C\uDFDA' },
+  knowledge:  { label: 'Knowledge',  icon: '\uD83D\uDCDA' },
+  care:       { label: 'Care',       icon: '\u2764' },
+};
+
 function renderUpgradesTab() {
   const c = $('tab-upgrades');
   c.textContent = '';
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.textContent = 'Upgrades coming in Phase 6. Save your money...';
-  c.appendChild(el);
+
+  const hdr = document.createElement('h2');
+  hdr.textContent = 'Upgrades';
+  c.appendChild(hdr);
+
+  const sub = document.createElement('p');
+  sub.style.cssText = 'font-size:.8rem;color:var(--text-muted);margin-bottom:16px';
+  sub.textContent = 'Invest in your ranch to unlock new abilities and improve efficiency.';
+  c.appendChild(sub);
+
+  // Money display
+  const moneyBar = document.createElement('div');
+  moneyBar.style.cssText = 'font-family:"Courier New",monospace;font-size:.9rem;color:var(--gold);margin-bottom:16px';
+  moneyBar.textContent = 'Available: $' + state.money;
+  c.appendChild(moneyBar);
+
+  const columns = document.createElement('div');
+  columns.className = 'upgrade-columns';
+
+  // Group upgrades by category
+  const groups = {};
+  for (const [key, upg] of Object.entries(UPGRADES)) {
+    const cat = upg.category;
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push({ key, ...upg });
+  }
+
+  for (const [catKey, catDef] of Object.entries(UPGRADE_CATEGORIES)) {
+    const items = groups[catKey];
+    if (!items) continue;
+
+    const group = document.createElement('div');
+    group.className = 'upgrade-group';
+
+    const groupTitle = document.createElement('h3');
+    groupTitle.textContent = catDef.icon + ' ' + catDef.label;
+    group.appendChild(groupTitle);
+
+    items.forEach(upg => {
+      const currentLevel = state.upgrades[upg.key] || 0;
+      const maxed = currentLevel >= upg.maxLevel;
+      const nextCost = maxed ? null : upg.costs[currentLevel];
+      const canAfford = nextCost !== null && state.money >= nextCost;
+
+      const item = document.createElement('div');
+      item.className = 'upgrade-item';
+      if (maxed) item.classList.add('owned');
+
+      const info = document.createElement('div');
+      info.className = 'upgrade-info';
+
+      const nameEl = document.createElement('div');
+      nameEl.className = 'upgrade-name';
+      nameEl.textContent = upg.name;
+      if (maxed) nameEl.textContent += ' \u2713';
+      else if (currentLevel > 0) nameEl.textContent += ' (Lv ' + currentLevel + ')';
+      info.appendChild(nameEl);
+
+      const descEl = document.createElement('div');
+      descEl.className = 'upgrade-desc';
+      if (maxed) {
+        descEl.textContent = 'Fully upgraded';
+      } else {
+        descEl.textContent = upg.descriptions[currentLevel];
+      }
+      info.appendChild(descEl);
+
+      // Show current effect if partially upgraded
+      if (currentLevel > 0 && !maxed) {
+        const currentEl = document.createElement('div');
+        currentEl.style.cssText = 'font-size:.6rem;color:var(--accent);margin-top:2px';
+        currentEl.textContent = 'Current: ' + upg.descriptions[currentLevel - 1];
+        info.appendChild(currentEl);
+      }
+
+      item.appendChild(info);
+
+      if (!maxed) {
+        const buyBtn = document.createElement('button');
+        buyBtn.className = canAfford ? 'btn btn-gold' : 'btn btn-muted';
+        buyBtn.style.cssText = 'font-size:.75rem;padding:4px 10px;white-space:nowrap';
+        buyBtn.textContent = '$' + nextCost;
+        buyBtn.disabled = !canAfford;
+
+        buyBtn.addEventListener('click', () => {
+          purchaseUpgrade(upg.key, nextCost);
+        });
+        item.appendChild(buyBtn);
+      }
+
+      group.appendChild(item);
+    });
+
+    columns.appendChild(group);
+  }
+
+  c.appendChild(columns);
+
+  // Stats summary
+  const summary = document.createElement('div');
+  summary.style.cssText = 'margin-top:20px;padding:12px;background:var(--bg-card);border-radius:var(--radius);font-size:.75rem;font-family:"Courier New",monospace;color:var(--text-muted)';
+  summary.textContent =
+    'Stable: ' + state.stable.length + '/' + getStableCap() +
+    ' | Nursery: ' + state.nursery.length + '/' + getNurseryCap() +
+    ' | Catch Gear: ' + CATCH_GEAR[state.upgrades.catchGear].name +
+    ' | Energy: ' + state.energy + '/' + (state.maxEnergy + state.upgrades.energyBoost) +
+    ' | Rep: ' + state.reputation;
+  c.appendChild(summary);
+}
+
+function purchaseUpgrade(key, cost) {
+  if (state.money < cost) return;
+  const currentLevel = state.upgrades[key] || 0;
+  const upg = UPGRADES[key];
+  if (currentLevel >= upg.maxLevel) return;
+
+  state.money -= cost;
+  state.upgrades[key] = currentLevel + 1;
+
+  state.eventLog = 'Purchased ' + upg.name + ' upgrade!';
+
+  // Apply immediate effects
+  if (key === 'energyBoost') {
+    // Don't retroactively give energy, just update max for next day
+  }
+
+  saveState();
+  renderHeader();
+  renderUpgradesTab();
 }
 
 /* ── Event Wiring ────────────────────────────── */
