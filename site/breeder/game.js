@@ -407,12 +407,16 @@ function initGame() {
     saveState();
   }
   renderAll();
+  checkOverCapacity();
 }
 
 /* ── Day Management ──────────────────────────── */
 function endDay() {
+  const daySummary = [];
   state.day++;
   state.energy = state.maxEnergy + (state.upgrades.energyBoost * 1);
+
+  daySummary.push('Energy restored to ' + state.energy + '.');
 
   // Age horses (every 30 game-days = 1 year)
   state.stable.forEach(h => {
@@ -422,9 +426,12 @@ function endDay() {
 
   // Happiness decay
   if (!state.upgrades.autoFeeder) {
+    let unhappy = 0;
     state.stable.forEach(h => {
       h.happiness = clamp(h.happiness - 2, 0, 100);
+      if (h.happiness <= 20) unhappy++;
     });
+    if (unhappy > 0) daySummary.push(unhappy + ' horse' + (unhappy > 1 ? 's are' : ' is') + ' unhappy!');
   }
 
   // Breed cooldowns
@@ -434,20 +441,32 @@ function endDay() {
     h.trainStreak = 0; // reset daily
   });
 
-  // Nursery progress
+  // Nursery progress — foals always born, never lost
+  const newFoals = [];
   for (let i = state.nursery.length - 1; i >= 0; i--) {
     state.nursery[i].daysLeft--;
     if (state.nursery[i].daysLeft <= 0) {
-      // Birth! Generate foal
       const entry = state.nursery[i];
       const foal = breedHorse(entry.parentAId, entry.parentBId);
-      if (foal && state.stable.length < state.stableCapacity + (state.upgrades.stableSize * 4)) {
+      if (foal) {
         state.stable.push(foal);
-        state.eventLog = foal.name + ' was born! A ' + foal.coat.fullName + ' ' + foal.breedLabel + '.';
+        newFoals.push(foal);
       }
       state.nursery.splice(i, 1);
     }
   }
+  newFoals.forEach(f => {
+    daySummary.push('\uD83C\uDF89 ' + f.name + ' was born! A ' + f.coat.fullName + ' ' + f.breedLabel + '.');
+  });
+
+  // Nursery in progress
+  state.nursery.forEach(n => {
+    if (n.daysLeft > 0) {
+      const pA = state.stable.find(h => h.id === n.parentAId);
+      const pB = state.stable.find(h => h.id === n.parentBId);
+      daySummary.push('Foal from ' + (pA ? pA.name : '?') + ' \u00D7 ' + (pB ? pB.name : '?') + ': ' + n.daysLeft + ' day' + (n.daysLeft !== 1 ? 's' : '') + ' left.');
+    }
+  });
 
   // Active events tick down
   state.activeEvents = state.activeEvents.filter(e => {
@@ -458,10 +477,194 @@ function endDay() {
   // Random event (10% chance)
   if (Math.random() < 0.10) {
     triggerRandomEvent();
+    daySummary.push(state.eventLog);
+  }
+
+  // Set event log to last notable thing
+  if (newFoals.length > 0) {
+    state.eventLog = newFoals.map(f => f.name + ' was born!').join(' ');
+  } else if (daySummary.length <= 1) {
+    state.eventLog = 'A quiet day on the ranch.';
+    daySummary.push('A quiet day on the ranch.');
   }
 
   saveState();
   renderAll();
+
+  // Show day summary modal
+  showDaySummary(daySummary, newFoals);
+
+  // Check if stable is over capacity — force player to release (after modal dismissed)
+}
+
+function showDaySummary(summary, newFoals) {
+  const modal = document.createElement('div');
+
+  const title = document.createElement('h2');
+  title.style.cssText = 'color:var(--accent);margin-bottom:4px';
+  title.textContent = 'Day ' + state.day;
+  modal.appendChild(title);
+
+  const sub = document.createElement('div');
+  sub.style.cssText = 'font-size:.75rem;color:var(--text-muted);margin-bottom:12px;font-family:"Courier New",monospace';
+  sub.textContent = '$' + state.money + ' \u2022 Rep ' + state.reputation + ' \u2022 Stable ' + state.stable.length + '/' + getStableCap();
+  modal.appendChild(sub);
+
+  // Events list
+  summary.forEach(text => {
+    const line = document.createElement('div');
+    line.style.cssText = 'font-size:.85rem;margin-bottom:6px;padding-left:8px;border-left:2px solid var(--border)';
+    // Highlight foal births
+    if (text.includes('born')) {
+      line.style.borderLeftColor = 'var(--gold)';
+      line.style.color = 'var(--gold)';
+    }
+    line.textContent = text;
+    modal.appendChild(line);
+  });
+
+  // Show new foal portraits if any
+  if (newFoals && newFoals.length > 0) {
+    const foalSection = document.createElement('div');
+    foalSection.style.cssText = 'display:flex;gap:10px;margin-top:12px;flex-wrap:wrap';
+    newFoals.forEach(foal => {
+      const card = document.createElement('div');
+      card.style.cssText = 'display:flex;align-items:center;gap:8px;background:var(--bg-card);border-radius:var(--radius);padding:8px 10px;border-left:3px solid var(--gold)';
+
+      const portrait = document.createElement('div');
+      portrait.className = 'horse-portrait';
+      portrait.style.cssText = 'width:48px;height:48px;background:' + portraitBg(foal.coat.bodyHex);
+      portrait.insertAdjacentHTML('beforeend', renderHorseSVG(foal));
+      card.appendChild(portrait);
+
+      const info = document.createElement('div');
+      const nameLine = document.createElement('div');
+      nameLine.style.cssText = 'font-size:.8rem;font-weight:600';
+      nameLine.textContent = foal.name;
+      info.appendChild(nameLine);
+      const detailLine = document.createElement('div');
+      detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
+      detailLine.textContent = foal.coat.fullName + ' ' + foal.breedLabel;
+      info.appendChild(detailLine);
+      card.appendChild(info);
+
+      foalSection.appendChild(card);
+    });
+    modal.appendChild(foalSection);
+  }
+
+  // Continue button
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary';
+  btn.style.marginTop = '16px';
+  btn.textContent = 'CONTINUE';
+  btn.addEventListener('click', () => {
+    hideModal();
+    // Re-render the currently active tab
+    const activeTab = document.querySelector('.tab-btn.active');
+    if (activeTab) activeTab.click();
+    // Check over-capacity after dismissing summary
+    checkOverCapacity();
+  });
+  modal.appendChild(btn);
+
+  showModal(modal);
+}
+
+function isPregnantMare(horse) {
+  if (horse.sex !== 'mare') return false;
+  // Check if this mare is a parent in any active nursery entry
+  // Convention: parentB is always the mare (we'll enforce this in startBreeding)
+  // But to be safe, check both slots
+  return state.nursery.some(n => n.parentAId === horse.id || n.parentBId === horse.id);
+}
+
+function checkOverCapacity() {
+  const cap = getStableCap();
+  if (state.stable.length <= cap) return;
+
+  const excess = state.stable.length - cap;
+  showForceRelease(excess);
+}
+
+function showForceRelease(excess) {
+  const modal = document.createElement('div');
+
+  const title = document.createElement('h2');
+  title.style.color = 'var(--red)';
+  title.textContent = 'Stable Over Capacity!';
+  modal.appendChild(title);
+
+  const desc = document.createElement('p');
+  desc.style.cssText = 'font-size:.85rem;color:var(--text-muted);margin:8px 0 12px';
+  desc.textContent = 'Your stable has ' + state.stable.length + ' horses but only ' + getStableCap() + ' slots. You must release ' + excess + ' horse' + (excess > 1 ? 's' : '') + ' to continue. New foals cannot be turned away!';
+  modal.appendChild(desc);
+
+  const counter = document.createElement('div');
+  counter.style.cssText = 'font-family:"Courier New",monospace;font-size:.9rem;color:var(--gold);margin-bottom:12px';
+  counter.textContent = 'Need to release: ' + excess + ' more';
+  counter.id = 'releaseCounter';
+  modal.appendChild(counter);
+
+  state.stable.forEach(horse => {
+    const card = document.createElement('div');
+    card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px;margin-bottom:6px;background:var(--bg-card);border-radius:var(--radius);border-left:3px solid ' + horse.coat.bodyHex;
+
+    const portrait = document.createElement('div');
+    portrait.className = 'horse-portrait';
+    portrait.style.cssText = 'width:48px;height:48px;background:' + portraitBg(horse.coat.bodyHex) + ';flex-shrink:0';
+    portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+    card.appendChild(portrait);
+
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+    const nameLine = document.createElement('div');
+    nameLine.style.cssText = 'font-size:.8rem;font-weight:600';
+    nameLine.textContent = horse.name;
+    info.appendChild(nameLine);
+    const detailLine = document.createElement('div');
+    detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
+    detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Age ' + horse.age;
+    info.appendChild(detailLine);
+    card.appendChild(info);
+
+    const pregnant = isPregnantMare(horse);
+    const releaseBtn = document.createElement('button');
+    releaseBtn.className = pregnant ? 'btn btn-muted' : 'btn btn-danger';
+    releaseBtn.style.cssText = 'font-size:.7rem;padding:4px 10px;flex-shrink:0';
+    releaseBtn.textContent = pregnant ? 'Pregnant' : 'Release';
+    releaseBtn.disabled = pregnant;
+    if (pregnant) releaseBtn.title = 'Cannot release a pregnant mare';
+    releaseBtn.addEventListener('click', () => {
+      if (pregnant) return;
+      state.stable = state.stable.filter(h => h.id !== horse.id);
+      saveState();
+      renderAll();
+
+      const remaining = state.stable.length - getStableCap();
+      if (remaining <= 0) {
+        hideModal();
+        state.eventLog = 'Stable is back to capacity.';
+        renderAll();
+      } else {
+        // Re-render the modal with updated count
+        hideModal();
+        showForceRelease(remaining);
+      }
+    });
+    card.appendChild(releaseBtn);
+
+    modal.appendChild(card);
+  });
+
+  // Show modal — not dismissable by clicking outside
+  const overlay = $('modalOverlay');
+  const modalEl = $('modalContent');
+  modalEl.textContent = '';
+  modalEl.appendChild(modal);
+  overlay.classList.add('active');
+  // Temporarily disable backdrop click
+  overlay.dataset.locked = 'true';
 }
 
 function triggerRandomEvent() {
@@ -651,7 +854,14 @@ function createHorseCard(horse) {
 
   const ageRow = document.createElement('div');
   ageRow.className = 'horse-age';
-  ageRow.textContent = 'Age: ' + horse.age + 'yr' + (horse.breedCooldown > 0 ? ' \u2022 Breed CD: ' + horse.breedCooldown + 'd' : '');
+  const isPreg = isPregnantMare(horse);
+  let ageText = 'Age: ' + horse.age + 'yr';
+  if (isPreg) {
+    ageText += ' \u2022 \uD83E\uDD30 Pregnant';
+  } else if (horse.breedCooldown > 0) {
+    ageText += ' \u2022 Breed CD: ' + horse.breedCooldown + 'd';
+  }
+  ageRow.textContent = ageText;
   info.appendChild(ageRow);
 
   // Stat bars
@@ -762,11 +972,15 @@ function toggleHorseDetail(card, horse) {
     }
   });
 
+  const pregnant = isPregnantMare(horse);
   const releaseBtn = document.createElement('button');
-  releaseBtn.className = 'btn btn-danger';
-  releaseBtn.textContent = 'Release';
+  releaseBtn.className = pregnant ? 'btn btn-muted' : 'btn btn-danger';
+  releaseBtn.textContent = pregnant ? 'Pregnant' : 'Release';
+  releaseBtn.disabled = pregnant;
+  if (pregnant) releaseBtn.title = 'Cannot release a pregnant mare';
   releaseBtn.addEventListener('click', e => {
     e.stopPropagation();
+    if (pregnant) return;
     if (confirm('Release ' + horse.name + ' into the wild? This cannot be undone.')) {
       state.stable = state.stable.filter(h => h.id !== horse.id);
       saveState();
@@ -808,14 +1022,432 @@ tabNav.addEventListener('click', e => {
   }
 });
 
-/* ── Placeholder Tab Renders (Phase 2+) ──────── */
+/* ── Breed Tab ────────────────────────────────── */
+let breedSlotA = null; // horse id
+let breedSlotB = null;
+
+function getNurseryCap() {
+  return state.nurseryCapacity + state.upgrades.nurserySize;
+}
+
+function canBreed(horse) {
+  return horse.breedCooldown <= 0 && horse.age >= 2;
+}
+
+function predictBreeding(parentA, parentB) {
+  // Simulate possible coat colors from parent genotypes
+  const possibleColors = {};
+  const SIMS = 50;
+  for (let i = 0; i < SIMS; i++) {
+    const geno = {};
+    for (const locus of Object.keys(COAT_LOCI)) {
+      geno[locus] = [
+        parentA.genotype[locus][Math.random() < 0.5 ? 0 : 1],
+        parentB.genotype[locus][Math.random() < 0.5 ? 0 : 1],
+      ];
+    }
+    const coat = resolveCoatColor(geno, 2);
+    possibleColors[coat.fullName] = (possibleColors[coat.fullName] || 0) + 1;
+  }
+
+  // Sort by frequency
+  const sorted = Object.entries(possibleColors).sort((a, b) => b[1] - a[1]);
+  const predictions = sorted.map(([name, count]) => ({
+    name,
+    pct: Math.round((count / SIMS) * 100),
+  }));
+
+  // Stat talent prediction
+  const statPredictions = {};
+  for (const key of Object.keys(STAT_DEFS)) {
+    const avg = Math.round((parentA.talents[key] + parentB.talents[key]) / 2);
+    statPredictions[key] = { min: clamp(avg - 8, 20, 100), max: clamp(avg + 8, 20, 100), avg };
+  }
+
+  // Breed label
+  let breedLabel;
+  if (parentA.breed === parentB.breed) {
+    breedLabel = BREEDS[parentA.breed].name;
+  } else {
+    breedLabel = BREEDS[parentA.breed].name + '-' + BREEDS[parentB.breed].name + ' Cross';
+  }
+
+  return { colors: predictions, stats: statPredictions, breedLabel };
+}
+
 function renderBreedTab() {
   const c = $('tab-breed');
   c.textContent = '';
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.textContent = 'Breeding coming in Phase 3. For now, enjoy your starter horses!';
-  c.appendChild(el);
+
+  const hdr = document.createElement('h2');
+  hdr.textContent = 'Breeding';
+  c.appendChild(hdr);
+
+  // License warning
+  if (!state.upgrades.breedLicense) {
+    const warn = document.createElement('div');
+    warn.style.cssText = 'background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.3);border-radius:var(--radius);padding:8px 12px;margin-bottom:12px;font-size:.8rem;color:var(--red)';
+    warn.textContent = 'You don\'t have a breeding license! Breeding risks fines from inspectors. Buy one in Upgrades.';
+    c.appendChild(warn);
+  }
+
+  // Parent slots
+  const slots = document.createElement('div');
+  slots.className = 'breed-slots';
+
+  slots.appendChild(createBreedSlot('A', breedSlotA));
+
+  const conn = document.createElement('div');
+  conn.className = 'breed-connector';
+  conn.textContent = '\u00D7'; // multiplication sign
+  slots.appendChild(conn);
+
+  slots.appendChild(createBreedSlot('B', breedSlotB));
+
+  c.appendChild(slots);
+
+  // Prediction panel (if both parents selected)
+  const parentA = breedSlotA ? state.stable.find(h => h.id === breedSlotA) : null;
+  const parentB = breedSlotB ? state.stable.find(h => h.id === breedSlotB) : null;
+
+  if (parentA && parentB && parentA.sex === parentB.sex) {
+    const warn = document.createElement('div');
+    warn.style.cssText = 'background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.3);border-radius:var(--radius);padding:10px 12px;font-size:.85rem;color:var(--red);margin-bottom:12px';
+    warn.textContent = 'Breeding requires one mare and one stallion. Select a ' + (parentA.sex === 'mare' ? 'stallion' : 'mare') + ' for the other slot.';
+    c.appendChild(warn);
+  }
+
+  if (parentA && parentB && parentA.sex !== parentB.sex) {
+    const pred = predictBreeding(parentA, parentB);
+    const panel = document.createElement('div');
+    panel.className = 'prediction-panel';
+
+    const predTitle = document.createElement('h3');
+    predTitle.style.color = 'var(--gold)';
+    predTitle.textContent = 'Foal Prediction: ' + pred.breedLabel;
+    panel.appendChild(predTitle);
+
+    // Color predictions
+    const colorSection = document.createElement('div');
+    colorSection.style.cssText = 'margin:8px 0;font-size:.8rem';
+    const colorLabel = document.createElement('div');
+    colorLabel.style.cssText = 'color:var(--text-muted);margin-bottom:4px;font-size:.7rem';
+    colorLabel.textContent = 'POSSIBLE COAT COLORS:';
+    colorSection.appendChild(colorLabel);
+
+    pred.colors.forEach(({ name, pct }) => {
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:2px';
+      const bar = document.createElement('div');
+      bar.style.cssText = 'width:' + Math.max(pct, 4) + '%;height:6px;background:var(--gold);border-radius:3px;min-width:4px;max-width:120px';
+      const label = document.createElement('span');
+      label.style.cssText = 'font-family:"Courier New",monospace;font-size:.75rem';
+      label.textContent = name + ' (' + pct + '%)';
+      row.appendChild(bar);
+      row.appendChild(label);
+      colorSection.appendChild(row);
+    });
+    panel.appendChild(colorSection);
+
+    // Stat talent predictions
+    const statSection = document.createElement('div');
+    statSection.style.cssText = 'margin:8px 0';
+    const statLabel = document.createElement('div');
+    statLabel.style.cssText = 'color:var(--text-muted);margin-bottom:4px;font-size:.7rem';
+    statLabel.textContent = 'TALENT POTENTIAL (foal ceiling):';
+    statSection.appendChild(statLabel);
+
+    for (const [key, p] of Object.entries(pred.stats)) {
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+
+      const lbl = document.createElement('span');
+      lbl.className = 'stat-label';
+      lbl.textContent = STAT_DEFS[key].name;
+
+      const track = document.createElement('div');
+      track.className = 'stat-track';
+      // Show range as a bar from min to max
+      const fill = document.createElement('div');
+      fill.style.cssText = 'height:100%;border-radius:3px;background:rgb(' + STAT_COLORS[key] + ');margin-left:' + p.min + '%;width:' + (p.max - p.min) + '%';
+      track.appendChild(fill);
+
+      const val = document.createElement('span');
+      val.className = 'stat-val';
+      val.textContent = p.min + '-' + p.max;
+      val.style.width = '40px';
+
+      row.appendChild(lbl);
+      row.appendChild(track);
+      row.appendChild(val);
+      statSection.appendChild(row);
+    }
+    panel.appendChild(statSection);
+
+    // Breed button
+    const btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:8px;margin-top:12px';
+
+    const breedBtn = document.createElement('button');
+    breedBtn.className = 'btn btn-gold';
+    breedBtn.textContent = 'BEGIN BREEDING (1 Energy, ~5 days)';
+
+    const nurseryFull = state.nursery.length >= getNurseryCap();
+    const stableFull = state.stable.length >= getStableCap();
+    const noEnergy = state.energy < 1;
+
+    breedBtn.disabled = nurseryFull || stableFull || noEnergy;
+    breedBtn.addEventListener('click', () => {
+      startBreeding(parentA, parentB);
+    });
+    btnRow.appendChild(breedBtn);
+
+    const clearBtn = document.createElement('button');
+    clearBtn.className = 'btn btn-muted';
+    clearBtn.textContent = 'CLEAR';
+    clearBtn.addEventListener('click', () => {
+      breedSlotA = null;
+      breedSlotB = null;
+      renderBreedTab();
+    });
+    btnRow.appendChild(clearBtn);
+
+    panel.appendChild(btnRow);
+
+    if (nurseryFull) {
+      const w = document.createElement('div');
+      w.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:6px';
+      w.textContent = 'Nursery full (' + state.nursery.length + '/' + getNurseryCap() + '). Wait for a foal to be born or upgrade.';
+      panel.appendChild(w);
+    }
+    if (stableFull) {
+      const w = document.createElement('div');
+      w.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:6px';
+      w.textContent = 'Stable full! Release a horse or upgrade before breeding.';
+      panel.appendChild(w);
+    }
+    if (noEnergy) {
+      const w = document.createElement('div');
+      w.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:6px';
+      w.textContent = 'Not enough energy. End the day to restore.';
+      panel.appendChild(w);
+    }
+
+    c.appendChild(panel);
+  }
+
+  // Active nursery
+  if (state.nursery.length > 0) {
+    const nurseryTitle = document.createElement('h3');
+    nurseryTitle.style.cssText = 'margin-top:16px;margin-bottom:8px;color:var(--accent)';
+    nurseryTitle.textContent = 'Nursery (' + state.nursery.length + '/' + getNurseryCap() + ')';
+    c.appendChild(nurseryTitle);
+
+    const grid = document.createElement('div');
+    grid.className = 'nursery-grid';
+
+    state.nursery.forEach(entry => {
+      const pA = state.stable.find(h => h.id === entry.parentAId);
+      const pB = state.stable.find(h => h.id === entry.parentBId);
+      const card = document.createElement('div');
+      card.className = 'nursery-card';
+
+      const names = document.createElement('div');
+      names.style.cssText = 'font-size:.85rem;font-weight:600';
+      names.textContent = (pA ? pA.name : '?') + ' \u00D7 ' + (pB ? pB.name : '?');
+      card.appendChild(names);
+
+      const info = document.createElement('div');
+      info.style.cssText = 'font-size:.75rem;color:var(--text-muted);margin-top:4px';
+      info.textContent = entry.daysLeft + ' day' + (entry.daysLeft !== 1 ? 's' : '') + ' remaining';
+      card.appendChild(info);
+
+      const bar = document.createElement('div');
+      bar.className = 'progress-bar';
+      const fill = document.createElement('div');
+      fill.className = 'progress-fill';
+      const totalDays = 5;
+      fill.style.width = Math.round(((totalDays - entry.daysLeft) / totalDays) * 100) + '%';
+      bar.appendChild(fill);
+      card.appendChild(bar);
+
+      grid.appendChild(card);
+    });
+
+    c.appendChild(grid);
+  }
+}
+
+function createBreedSlot(label, horseId) {
+  const slot = document.createElement('div');
+  slot.className = 'breed-slot';
+
+  if (horseId) {
+    const horse = state.stable.find(h => h.id === horseId);
+    if (horse) {
+      slot.classList.add('filled');
+
+      const portrait = document.createElement('div');
+      portrait.className = 'horse-portrait';
+      portrait.style.cssText = 'width:64px;height:64px;background:' + portraitBg(horse.coat.bodyHex);
+      portrait.querySelector || portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+      slot.appendChild(portrait);
+
+      const name = document.createElement('div');
+      name.style.cssText = 'font-size:.8rem;font-weight:600;margin-top:4px';
+      name.textContent = horse.name;
+      slot.appendChild(name);
+
+      const info = document.createElement('div');
+      info.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
+      info.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex;
+      slot.appendChild(info);
+
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:4px;margin-top:6px';
+
+      const changeBtn = document.createElement('button');
+      changeBtn.className = 'btn btn-muted';
+      changeBtn.style.cssText = 'font-size:.7rem;padding:3px 8px';
+      changeBtn.textContent = 'Change';
+      changeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openHorsePicker(label);
+      });
+      btnRow.appendChild(changeBtn);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.className = 'btn btn-danger';
+      removeBtn.style.cssText = 'font-size:.7rem;padding:3px 8px';
+      removeBtn.textContent = 'Remove';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (label === 'A') breedSlotA = null;
+        else breedSlotB = null;
+        renderBreedTab();
+      });
+      btnRow.appendChild(removeBtn);
+
+      slot.appendChild(btnRow);
+      return slot;
+    }
+  }
+
+  // Empty slot
+  const placeholder = document.createElement('div');
+  placeholder.style.cssText = 'color:var(--text-muted);font-size:.85rem';
+  placeholder.textContent = 'Select Parent ' + label;
+  slot.appendChild(placeholder);
+
+  const hint = document.createElement('div');
+  hint.style.cssText = 'font-size:.7rem;color:var(--text-muted);margin-top:4px';
+  hint.textContent = 'Click to choose';
+  slot.appendChild(hint);
+
+  slot.addEventListener('click', () => {
+    openHorsePicker(label);
+  });
+
+  return slot;
+}
+
+function openHorsePicker(slotLabel) {
+  const modal = document.createElement('div');
+
+  const title = document.createElement('h2');
+  title.textContent = 'Select Parent ' + slotLabel;
+  modal.appendChild(title);
+
+  const otherSlotId = slotLabel === 'A' ? breedSlotB : breedSlotA;
+
+  // Filter eligible horses
+  const eligible = state.stable.filter(h => {
+    if (h.id === otherSlotId) return false; // can't breed with self
+    if (!canBreed(h)) return false;
+    return true;
+  });
+
+  if (eligible.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No eligible horses. Horses must be at least 2 years old and not on breeding cooldown.';
+    modal.appendChild(empty);
+  }
+
+  eligible.forEach(horse => {
+    const card = document.createElement('div');
+    card.className = 'horse-card';
+    card.style.cssText = 'border-left-color:' + horse.coat.bodyHex + ';cursor:pointer;margin-bottom:8px';
+
+    const portrait = document.createElement('div');
+    portrait.className = 'horse-portrait';
+    portrait.style.cssText = 'width:56px;height:56px;background:' + portraitBg(horse.coat.bodyHex);
+    portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+
+    const info = document.createElement('div');
+    info.className = 'horse-info';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'horse-name';
+    nameEl.textContent = horse.name;
+    info.appendChild(nameEl);
+
+    const details = document.createElement('div');
+    details.style.cssText = 'font-size:.75rem;color:var(--text-muted)';
+    details.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Age ' + horse.age;
+    info.appendChild(details);
+
+    card.appendChild(portrait);
+    card.appendChild(info);
+
+    card.addEventListener('click', () => {
+      if (slotLabel === 'A') breedSlotA = horse.id;
+      else breedSlotB = horse.id;
+      hideModal();
+      renderBreedTab();
+    });
+
+    modal.appendChild(card);
+  });
+
+  // Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-muted';
+  closeBtn.style.marginTop = '12px';
+  closeBtn.textContent = 'Cancel';
+  closeBtn.addEventListener('click', hideModal);
+  modal.appendChild(closeBtn);
+
+  showModal(modal);
+}
+
+function startBreeding(parentA, parentB) {
+  if (state.energy < 1) return;
+  if (state.nursery.length >= getNurseryCap()) return;
+  if (state.stable.length >= getStableCap()) return;
+
+  state.energy--;
+
+  // Add to nursery
+  state.nursery.push({
+    parentAId: parentA.id,
+    parentBId: parentB.id,
+    daysLeft: 5,
+  });
+
+  // Set cooldowns
+  parentA.breedCooldown = 5;
+  parentB.breedCooldown = 5;
+
+  state.eventLog = parentA.name + ' and ' + parentB.name + ' are now breeding! Foal expected in 5 days.';
+
+  // Clear slots
+  breedSlotA = null;
+  breedSlotB = null;
+
+  saveState();
+  renderHeader();
+  renderBreedTab();
 }
 
 function renderTrainTab() {
@@ -827,13 +1459,343 @@ function renderTrainTab() {
   c.appendChild(el);
 }
 
+/* ── Explore Tab ──────────────────────────────── */
+let selectedBiome = null;
+let encounterState = null; // null | { horse, biomeKey } | 'nothing'
+
+function getStableCap() {
+  return state.stableCapacity + state.upgrades.stableSize * 4;
+}
+
+function getCatchBonus() {
+  return CATCH_GEAR[state.upgrades.catchGear] ? CATCH_GEAR[state.upgrades.catchGear].bonus : 0;
+}
+
+function hasActiveEvent(effect) {
+  return state.activeEvents.some(e => e.effect === effect);
+}
+
 function renderExploreTab() {
   const c = $('tab-explore');
   c.textContent = '';
-  const el = document.createElement('div');
-  el.className = 'empty-state';
-  el.textContent = 'Exploration coming in Phase 2. The plains await...';
-  c.appendChild(el);
+
+  // Header
+  const hdr = document.createElement('h2');
+  hdr.textContent = 'Explore the Wilds';
+  c.appendChild(hdr);
+
+  const sub = document.createElement('p');
+  sub.style.cssText = 'font-size:.8rem;color:var(--text-muted);margin-bottom:12px';
+  sub.textContent = 'Venture out to find and catch wild horses. Costs 1 energy per expedition.';
+  c.appendChild(sub);
+
+  // Storm check
+  if (hasActiveEvent('storm')) {
+    const storm = document.createElement('div');
+    storm.className = 'encounter-panel';
+    storm.style.cssText = 'color:var(--red);margin-bottom:12px';
+    storm.textContent = 'A storm is raging! Exploration is blocked today.';
+    c.appendChild(storm);
+    return;
+  }
+
+  // Biome cards
+  const biomeRow = document.createElement('div');
+  biomeRow.className = 'biome-cards';
+
+  for (const [key, biome] of Object.entries(BIOMES)) {
+    const card = document.createElement('div');
+    card.className = 'biome-card';
+    const locked = state.reputation < biome.repRequired;
+    if (locked) card.classList.add('locked');
+    if (selectedBiome === key && !locked) card.classList.add('selected');
+
+    const name = document.createElement('div');
+    name.className = 'biome-name';
+    name.textContent = biome.name;
+    card.appendChild(name);
+
+    const desc = document.createElement('div');
+    desc.className = 'biome-desc';
+    desc.textContent = locked ? 'Requires ' + biome.repRequired + ' reputation' : biome.description;
+    card.appendChild(desc);
+
+    // Show breeds available
+    if (!locked) {
+      const breeds = document.createElement('div');
+      breeds.style.cssText = 'font-size:.7rem;color:var(--gold);margin-top:6px;font-family:"Courier New",monospace';
+      breeds.textContent = biome.breeds.map(b => BREEDS[b].name).join(', ');
+      card.appendChild(breeds);
+
+      // Catch rate info
+      const rate = document.createElement('div');
+      rate.style.cssText = 'font-size:.65rem;color:var(--text-muted);margin-top:3px';
+      const baseRate = Math.round((biome.catchDifficulty + getCatchBonus()) * 100);
+      rate.textContent = 'Catch rate: ~' + Math.min(95, baseRate) + '% | Rare chance: ' + Math.round(biome.rareChance * 100) + '%';
+      card.appendChild(rate);
+    }
+
+    if (!locked) {
+      card.addEventListener('click', () => {
+        selectedBiome = key;
+        encounterState = null;
+        renderExploreTab();
+      });
+    }
+
+    biomeRow.appendChild(card);
+  }
+  c.appendChild(biomeRow);
+
+  // Action area
+  if (selectedBiome) {
+    const panel = document.createElement('div');
+    panel.className = 'encounter-panel';
+
+    if (encounterState === null) {
+      // Ready to explore
+      const info = document.createElement('p');
+      info.style.cssText = 'margin-bottom:12px;font-size:.9rem';
+      info.textContent = 'Ready to explore ' + BIOMES[selectedBiome].name + '.';
+      panel.appendChild(info);
+
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'EXPLORE (1 Energy)';
+      btn.disabled = state.energy < 1 || state.stable.length >= getStableCap();
+
+      if (state.energy < 1) {
+        const warn = document.createElement('p');
+        warn.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:8px';
+        warn.textContent = 'Not enough energy. End the day to restore.';
+        panel.appendChild(warn);
+      }
+      if (state.stable.length >= getStableCap()) {
+        const warn = document.createElement('p');
+        warn.style.cssText = 'font-size:.75rem;color:var(--red);margin-top:8px';
+        warn.textContent = 'Stable is full! Release a horse or upgrade.';
+        panel.appendChild(warn);
+      }
+
+      btn.addEventListener('click', () => {
+        doExplore(selectedBiome);
+      });
+      panel.appendChild(btn);
+
+    } else if (encounterState === 'nothing') {
+      // Found nothing
+      const msg = document.createElement('p');
+      msg.style.cssText = 'font-size:.9rem;color:var(--text-muted)';
+      msg.textContent = 'You searched the area but found no wild horses today. The plains are quiet.';
+      panel.appendChild(msg);
+
+      const again = document.createElement('button');
+      again.className = 'btn btn-muted';
+      again.textContent = 'TRY AGAIN';
+      again.disabled = state.energy < 1;
+      again.style.marginTop = '12px';
+      again.addEventListener('click', () => {
+        encounterState = null;
+        renderExploreTab();
+      });
+      panel.appendChild(again);
+
+    } else if (encounterState && encounterState.horse) {
+      // Found a horse!
+      renderEncounter(panel, encounterState);
+    }
+
+    c.appendChild(panel);
+  }
+
+  // Equipment info
+  const gear = document.createElement('div');
+  gear.style.cssText = 'margin-top:16px;font-size:.75rem;color:var(--text-muted);font-family:"Courier New",monospace';
+  gear.textContent = 'Equipment: ' + CATCH_GEAR[state.upgrades.catchGear].name +
+    ' | Stable: ' + state.stable.length + '/' + getStableCap();
+  c.appendChild(gear);
+}
+
+function doExplore(biomeKey) {
+  if (state.energy < 1 || state.stable.length >= getStableCap()) return;
+
+  state.energy--;
+
+  const biome = BIOMES[biomeKey];
+
+  // 75% chance to encounter a horse, 25% nothing
+  if (Math.random() < 0.25) {
+    encounterState = 'nothing';
+    state.eventLog = 'You searched ' + biome.name + ' but found nothing.';
+  } else {
+    // Pick a breed from this biome
+    const breedKey = pick(biome.breeds);
+    const horse = createWildHorse(breedKey);
+
+    // Rare variant?
+    const rareChance = biome.rareChance + (hasActiveEvent('rareBoost') ? 0.15 : 0);
+    if (Math.random() < rareChance) {
+      // Give this horse an unusual allele combo — force a dilution or pattern
+      const rareTrait = pick(['cream', 'dun', 'tobiano', 'roan', 'grey']);
+      const alleles = COAT_LOCI[rareTrait].alleles;
+      // Force at least one dominant/special allele
+      horse.genotype[rareTrait] = [alleles[0], Math.random() < 0.4 ? alleles[0] : alleles[1]];
+      horse.coat = resolveCoatColor(horse.genotype, horse.age);
+      state.eventLog = 'A rare ' + horse.coat.fullName + ' ' + BREEDS[breedKey].name + ' spotted!';
+    } else {
+      state.eventLog = 'A wild ' + horse.coat.fullName + ' ' + BREEDS[breedKey].name + ' found!';
+    }
+
+    encounterState = { horse, biomeKey };
+  }
+
+  renderHeader();
+  renderExploreTab();
+}
+
+function renderEncounter(panel, encounter) {
+  const horse = encounter.horse;
+  const biome = BIOMES[encounter.biomeKey];
+
+  // Horse preview
+  const title = document.createElement('h3');
+  title.style.cssText = 'color:var(--gold);margin-bottom:8px';
+  title.textContent = 'Wild ' + horse.coat.fullName + ' ' + horse.breedLabel + ' spotted!';
+  panel.appendChild(title);
+
+  const previewRow = document.createElement('div');
+  previewRow.style.cssText = 'display:flex;gap:16px;align-items:center;margin-bottom:12px';
+
+  const portrait = document.createElement('div');
+  portrait.className = 'horse-portrait';
+  portrait.style.cssText = 'width:100px;height:100px;background:' + portraitBg(horse.coat.bodyHex);
+  portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+  previewRow.appendChild(portrait);
+
+  const details = document.createElement('div');
+  details.style.cssText = 'font-size:.8rem';
+
+  const breedLine = document.createElement('div');
+  breedLine.style.cssText = 'color:var(--text-muted);margin-bottom:4px';
+  breedLine.textContent = horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Age ' + horse.age + 'yr';
+  details.appendChild(breedLine);
+
+  // Show top stats as pills
+  const statPills = document.createElement('div');
+  statPills.className = 'pills';
+  statPills.style.marginBottom = '6px';
+  const sortedStats = Object.entries(horse.stats).sort((a, b) => b[1] - a[1]);
+  sortedStats.slice(0, 3).forEach(([key, val]) => {
+    const pill = document.createElement('span');
+    pill.className = 'pill pill-' + key;
+    pill.textContent = STAT_DEFS[key].name + ' ' + val;
+    statPills.appendChild(pill);
+  });
+  details.appendChild(statPills);
+
+  previewRow.appendChild(details);
+  panel.appendChild(previewRow);
+
+  // Catch attempt
+  const catchRate = Math.min(0.95, biome.catchDifficulty + getCatchBonus() - (hasActiveEvent('gearDown') ? 0.15 : 0));
+  const rateText = document.createElement('div');
+  rateText.style.cssText = 'font-size:.8rem;color:var(--text-muted);margin-bottom:10px;font-family:"Courier New",monospace';
+  rateText.textContent = 'Catch probability: ' + Math.round(catchRate * 100) + '%';
+  panel.appendChild(rateText);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px';
+
+  const catchBtn = document.createElement('button');
+  catchBtn.className = 'btn btn-primary';
+  catchBtn.textContent = 'ATTEMPT CATCH';
+  catchBtn.addEventListener('click', () => {
+    attemptCatch(horse, catchRate);
+  });
+  btnRow.appendChild(catchBtn);
+
+  const skipBtn = document.createElement('button');
+  skipBtn.className = 'btn btn-muted';
+  skipBtn.textContent = 'LET IT GO';
+  skipBtn.addEventListener('click', () => {
+    encounterState = null;
+    state.eventLog = 'You let the ' + horse.coat.fullName + ' ' + horse.breedLabel + ' go free.';
+    renderExploreTab();
+  });
+  btnRow.appendChild(skipBtn);
+
+  panel.appendChild(btnRow);
+}
+
+function attemptCatch(horse, catchRate) {
+  if (state.stable.length >= getStableCap()) return;
+
+  const success = Math.random() < catchRate;
+
+  if (success) {
+    state.stable.push(horse);
+    // Track in bestiary
+    state.bestiary[horse.breed] = (state.bestiary[horse.breed] || 0) + 1;
+    state.eventLog = 'Caught ' + horse.name + '! A ' + horse.coat.fullName + ' ' + horse.breedLabel + ' joins your stable.';
+    encounterState = null;
+    saveState();
+    renderHeader();
+    showCatchResult(true, horse);
+  } else {
+    state.eventLog = 'The ' + horse.coat.fullName + ' ' + horse.breedLabel + ' escaped!';
+    encounterState = null;
+    saveState();
+    showCatchResult(false, horse);
+  }
+}
+
+function showCatchResult(success, horse) {
+  const c = $('tab-explore');
+  // Keep biome cards, replace encounter panel
+  const oldPanel = c.querySelector('.encounter-panel');
+  if (oldPanel) oldPanel.remove();
+
+  const panel = document.createElement('div');
+  panel.className = 'encounter-panel';
+
+  const msg = document.createElement('p');
+  msg.style.cssText = 'font-size:1rem;margin-bottom:12px';
+  if (success) {
+    msg.style.color = 'var(--accent)';
+    msg.textContent = 'Success! ' + horse.name + ' has been added to your stable!';
+  } else {
+    msg.style.color = 'var(--red)';
+    msg.textContent = 'The horse bolted! ' + horse.coat.fullName + ' ' + horse.breedLabel + ' escaped into the wild.';
+  }
+  panel.appendChild(msg);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:8px';
+
+  if (state.energy > 0 && state.stable.length < getStableCap()) {
+    const again = document.createElement('button');
+    again.className = 'btn btn-primary';
+    again.textContent = 'EXPLORE AGAIN';
+    again.addEventListener('click', () => {
+      encounterState = null;
+      renderExploreTab();
+    });
+    btnRow.appendChild(again);
+  }
+
+  const back = document.createElement('button');
+  back.className = 'btn btn-muted';
+  back.textContent = 'BACK TO STABLE';
+  back.addEventListener('click', () => {
+    encounterState = null;
+    selectedBiome = null;
+    // Switch to stable tab
+    document.querySelector('[data-tab="stable"]').click();
+  });
+  btnRow.appendChild(back);
+
+  panel.appendChild(btnRow);
+  c.appendChild(panel);
 }
 
 function renderMarketTab() {
@@ -856,6 +1818,7 @@ function renderUpgradesTab() {
 
 /* ── Event Wiring ────────────────────────────── */
 $('endDayBtn').addEventListener('click', endDay);
+$('resetBtn').addEventListener('click', () => { resetGame(); });
 
 /* ── Modal ───────────────────────────────────── */
 function showModal(content) {
@@ -872,10 +1835,11 @@ function showModal(content) {
 
 function hideModal() {
   $('modalOverlay').classList.remove('active');
+  $('modalOverlay').dataset.locked = '';
 }
 
 $('modalOverlay').addEventListener('click', e => {
-  if (e.target === $('modalOverlay')) hideModal();
+  if (e.target === $('modalOverlay') && $('modalOverlay').dataset.locked !== 'true') hideModal();
 });
 
 /* ── New Game / Reset ────────────────────────── */
