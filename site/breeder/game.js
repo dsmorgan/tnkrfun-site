@@ -132,7 +132,7 @@ function resolveCoatColor(genotype, age) {
   }
 
   // Grey override for display
-  const displayColor = (isGrey && age > 2) ? 'grey' : baseColor;
+  const displayColor = (isGrey && age >= 2) ? 'grey' : baseColor;
 
   // Patterns
   const hasTobiano = hasDom(tob, 'T');
@@ -247,6 +247,7 @@ function createWildHorse(breedKey) {
     lastTrainedStat: null,
     trainStreak: 0,
     sex: Math.random() < 0.5 ? 'mare' : 'stallion',
+    maxAge: randRange(25, 30),
   };
 }
 
@@ -366,6 +367,9 @@ function defaultState() {
       firstBreed: false,
       firstSale: false,
     },
+    feedStock: { basic: 0, premium: 0 },
+    supplies: { treats: 0, brush: 0, appleBasket: 0 },
+    retired: [],
     eventLog: 'Your uncle left you a ranch, a questionable breeding license, and a horse named "Regret."',
     activeEvents: [], // { effect, daysLeft }
   };
@@ -380,8 +384,13 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       state = JSON.parse(raw);
-      // Re-resolve coat colors (they contain computed display data)
+      // Migrate old saves
+      if (!state.feedStock) state.feedStock = { basic: 0, premium: 0 };
+      if (!state.supplies) state.supplies = { treats: 0, brush: 0, appleBasket: 0 };
+      if (!state.retired) state.retired = [];
       state.stable.forEach(h => {
+        if (!h.maxAge) h.maxAge = randRange(25, 30);
+        if (h.careToday === undefined) h.careToday = 0;
         h.coat = resolveCoatColor(h.genotype, h.age);
       });
       return true;
@@ -418,27 +427,67 @@ function endDay() {
 
   daySummary.push('Energy restored to ' + state.energy + '.');
 
-  // Age horses (every 30 game-days = 1 year)
-  state.stable.forEach(h => {
-    // Simple: age in years, increment by fraction
-    // For game purposes, age stays in years and we don't increment every day
-  });
+  // Age horses: 1 game-day ≈ 2 real months
+  const AGE_PER_DAY = 2 / 12; // ~0.167 years per day
+  for (let i = state.stable.length - 1; i >= 0; i--) {
+    const h = state.stable[i];
+    h.age += AGE_PER_DAY;
+    // Re-resolve coat (grey horses change appearance with age)
+    h.coat = resolveCoatColor(h.genotype, h.age);
+    // Retirement check
+    if (h.maxAge && h.age >= h.maxAge) {
+      if (!state.retired) state.retired = [];
+      state.retired.push(h);
+      state.stable.splice(i, 1);
+      daySummary.push(h.name + ' has retired after a full life at age ' + Math.floor(h.age) + '. Farewell, champion.');
+    }
+  }
 
-  // Happiness decay
-  if (!state.upgrades.autoFeeder) {
+  // Feed consumption & happiness decay
+  const horseCount = state.stable.length;
+  const hasAutoFeeder = state.upgrades.autoFeeder > 0;
+  let basicFed = false;
+  let premiumFed = false;
+
+  // Basic feed check
+  if (hasAutoFeeder || (state.feedStock && state.feedStock.basic >= horseCount)) {
+    basicFed = true;
+    if (!hasAutoFeeder && state.feedStock) state.feedStock.basic -= horseCount;
+  } else if (state.feedStock && state.feedStock.basic > 0) {
+    // Partial feed — use what we have, rest go hungry
+    state.feedStock.basic = 0;
+  }
+
+  // Premium feed check (only if basic is covered)
+  if (basicFed && state.feedStock && state.feedStock.premium >= horseCount) {
+    premiumFed = true;
+    state.feedStock.premium -= horseCount;
+  }
+
+  // Apply feed effects + happiness decay
+  {
     let unhappy = 0;
     state.stable.forEach(h => {
-      h.happiness = clamp(h.happiness - 2, 0, 100);
+      if (!basicFed) {
+        h.happiness = clamp(h.happiness - 2, 0, 100);
+      }
+      if (premiumFed) {
+        h.happiness = clamp(h.happiness + 1, 0, 100);
+        h.premiumFed = true;
+      }
       if (h.happiness <= 20) unhappy++;
     });
     if (unhappy > 0) daySummary.push(unhappy + ' horse' + (unhappy > 1 ? 's are' : ' is') + ' unhappy!');
   }
 
-  // Breed cooldowns
+  // Breed cooldowns & daily resets
   state.stable.forEach(h => {
     if (h.breedCooldown > 0) h.breedCooldown--;
     if (h.competeCooldown > 0) h.competeCooldown--;
-    h.trainStreak = 0; // reset daily
+    h.trainStreak = 0;
+    h.careToday = 0;      // reset care action limit
+    h.brushed = false;     // reset grooming bonus
+    if (!premiumFed) h.premiumFed = false; // only keep if fed today
   });
 
   // Nursery progress — foals always born, never lost
@@ -488,6 +537,19 @@ function endDay() {
   if (Math.random() < 0.10) {
     triggerRandomEvent();
     daySummary.push(state.eventLog);
+  }
+
+  // License expiry warning
+  const licDays = licenseDaysLeft();
+  if (licDays > 0 && licDays <= 5) {
+    daySummary.push('\u26A0 Breeding license expires in ' + licDays + ' day' + (licDays !== 1 ? 's' : '') + '! Renew in Upgrades.');
+  } else if (state.upgrades.breedLicense && licDays <= 0) {
+    daySummary.push('\u274C Your breeding license has expired!');
+  }
+
+  // Feed stock warning
+  if (!hasAutoFeeder && state.feedStock && state.feedStock.basic < state.stable.length * 3) {
+    daySummary.push('Feed stock running low! (' + state.feedStock.basic + ' servings left)');
   }
 
   // Set event log to last notable thing
@@ -692,7 +754,7 @@ function triggerRandomEvent() {
   }
 
   // Immediate effects
-  if (chosen.effect === 'inspection' && !state.upgrades.breedLicense && state.nursery.length > 0) {
+  if (chosen.effect === 'inspection' && !hasValidLicense() && state.nursery.length > 0) {
     const fine = 100;
     state.money = Math.max(0, state.money - fine);
     state.eventLog += ' You were fined $' + fine + ' for unlicensed breeding!';
@@ -772,6 +834,7 @@ function breedHorse(parentAId, parentBId) {
     lastTrainedStat: null,
     trainStreak: 0,
     sex: Math.random() < 0.5 ? 'mare' : 'stallion',
+    maxAge: randRange(25, 30),
   };
 }
 
@@ -829,6 +892,29 @@ function renderStable() {
   });
 
   container.appendChild(grid);
+
+  // Retired horses
+  if (state.retired && state.retired.length > 0) {
+    const retTitle = document.createElement('h3');
+    retTitle.style.cssText = 'margin-top:20px;margin-bottom:8px;color:var(--text-muted);cursor:pointer';
+    retTitle.textContent = '\u25B6 Retired (' + state.retired.length + ')';
+    let retOpen = false;
+    const retList = document.createElement('div');
+    retList.style.display = 'none';
+    state.retired.forEach(h => {
+      const row = document.createElement('div');
+      row.style.cssText = 'font-size:.8rem;color:var(--text-muted);padding:4px 8px;border-bottom:1px solid var(--border)';
+      row.textContent = h.name + ' \u2014 ' + h.coat.fullName + ' ' + h.breedLabel + ', Gen ' + h.generation + ', retired at age ' + Math.floor(h.age);
+      retList.appendChild(row);
+    });
+    retTitle.addEventListener('click', () => {
+      retOpen = !retOpen;
+      retList.style.display = retOpen ? 'block' : 'none';
+      retTitle.textContent = (retOpen ? '\u25BC' : '\u25B6') + ' Retired (' + state.retired.length + ')';
+    });
+    container.appendChild(retTitle);
+    container.appendChild(retList);
+  }
 }
 
 function createHorseCard(horse) {
@@ -865,7 +951,7 @@ function createHorseCard(horse) {
   const ageRow = document.createElement('div');
   ageRow.className = 'horse-age';
   const isPreg = isPregnantMare(horse);
-  let ageText = 'Age: ' + horse.age + 'yr';
+  let ageText = 'Age: ' + Math.floor(horse.age) + 'yr';
   if (isPreg) {
     ageText += ' \u2022 \uD83E\uDD30 Pregnant';
   } else if (horse.breedCooldown > 0) {
@@ -1026,6 +1112,7 @@ tabNav.addEventListener('click', e => {
     case 'stable':  renderStable(); break;
     case 'breed':   renderBreedTab(); break;
     case 'train':   renderTrainTab(); break;
+    case 'care':    renderCareTab(); break;
     case 'explore': renderExploreTab(); break;
     case 'market':  renderMarketTab(); break;
     case 'upgrades':renderUpgradesTab(); break;
@@ -1094,7 +1181,7 @@ function renderBreedTab() {
   c.appendChild(hdr);
 
   // License warning
-  if (!state.upgrades.breedLicense) {
+  if (!hasValidLicense()) {
     const warn = document.createElement('div');
     warn.style.cssText = 'background:rgba(255,68,68,.08);border:1px solid rgba(255,68,68,.3);border-radius:var(--radius);padding:8px 12px;margin-bottom:12px;font-size:.8rem;color:var(--red)';
     warn.textContent = 'You don\'t have a breeding license! Breeding risks fines from inspectors. Buy one in Upgrades.';
@@ -1749,7 +1836,9 @@ function doTraining(horse, statKey) {
   const youngBonus = horse.age < 3 ? 1.3 : 1.0;
   const weatherBonus = hasActiveEvent('goodWeather') ? 1.3 : 1.0;
 
-  let baseGain = randRange(1, 3) + facilityBonus;
+  let baseGain = randRange(3, 6) + facilityBonus;
+  if (horse.premiumFed) baseGain = Math.round(baseGain * 1.5);
+  if (horse.brushed) { baseGain += 1; horse.brushed = false; }
   let gain = Math.max(1, Math.round(baseGain * diminishing * happinessMulti * youngBonus * weatherBonus));
   gain = Math.min(gain, headroom); // don't exceed talent
 
@@ -1996,12 +2085,266 @@ function doCompetition(horse, eventKey, evt) {
   showModal(modal);
 }
 
+/* ── Care Tab ─────────────────────────────────── */
+function renderCareTab() {
+  const c = $('tab-care');
+  c.textContent = '';
+
+  const hdr = document.createElement('h2');
+  hdr.textContent = 'Horse Care';
+  c.appendChild(hdr);
+
+  // Ensure state has feed/supply fields (migration)
+  if (!state.feedStock) state.feedStock = { basic: 0, premium: 0 };
+  if (!state.supplies) state.supplies = { treats: 0, brush: 0, appleBasket: 0 };
+
+  // ── Shop Section ──
+  const shopTitle = document.createElement('h3');
+  shopTitle.style.cssText = 'margin:12px 0 8px';
+  shopTitle.textContent = 'Supply Shop';
+  c.appendChild(shopTitle);
+
+  const shopGrid = document.createElement('div');
+  shopGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;margin-bottom:16px';
+
+  for (const [key, item] of Object.entries(CARE_SHOP)) {
+    const card = document.createElement('div');
+    card.className = 'upgrade-item';
+
+    const info = document.createElement('div');
+    info.className = 'upgrade-info';
+    const nameEl = document.createElement('div');
+    nameEl.className = 'upgrade-name';
+    nameEl.textContent = item.name;
+    info.appendChild(nameEl);
+    const descEl = document.createElement('div');
+    descEl.className = 'upgrade-desc';
+    descEl.textContent = item.desc;
+    info.appendChild(descEl);
+    card.appendChild(info);
+
+    const buyBtn = document.createElement('button');
+    const canAfford = state.money >= item.cost;
+    buyBtn.className = canAfford ? 'btn btn-gold' : 'btn btn-muted';
+    buyBtn.style.cssText = 'font-size:.75rem;padding:4px 10px;white-space:nowrap';
+    buyBtn.textContent = '$' + item.cost;
+    buyBtn.disabled = !canAfford;
+    buyBtn.addEventListener('click', () => {
+      buySupply(key);
+    });
+    card.appendChild(buyBtn);
+    shopGrid.appendChild(card);
+  }
+  c.appendChild(shopGrid);
+
+  // ── Stock Display ──
+  const stockBar = document.createElement('div');
+  stockBar.style.cssText = 'font-family:"Courier New",monospace;font-size:.8rem;color:var(--text-muted);margin-bottom:16px;padding:8px 10px;background:var(--bg-card);border-radius:var(--radius)';
+  const hasAF = state.upgrades.autoFeeder > 0;
+  stockBar.textContent =
+    'Basic Feed: ' + (hasAF ? '\u221E (Auto-Feeder)' : state.feedStock.basic + ' servings') +
+    ' | Premium Feed: ' + state.feedStock.premium + ' servings' +
+    ' | Treats: ' + state.supplies.treats +
+    ' | Brushes: ' + state.supplies.brush +
+    ' | Apple Baskets: ' + state.supplies.appleBasket;
+  c.appendChild(stockBar);
+
+  // ── Horse Care List ──
+  const careTitle = document.createElement('h3');
+  careTitle.style.cssText = 'margin-bottom:8px';
+  careTitle.textContent = 'Care for Your Horses (up to 2 actions per horse per day)';
+  c.appendChild(careTitle);
+
+  if (state.stable.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'No horses to care for.';
+    c.appendChild(empty);
+    return;
+  }
+
+  state.stable.forEach(horse => {
+    const card = document.createElement('div');
+    card.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px;margin-bottom:8px;background:var(--bg-card);border-radius:var(--radius);border-left:3px solid ' + horse.coat.bodyHex;
+
+    // Portrait
+    const portrait = document.createElement('div');
+    portrait.className = 'horse-portrait';
+    portrait.style.cssText = 'width:48px;height:48px;background:' + portraitBg(horse.coat.bodyHex) + ';flex-shrink:0';
+    portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+    card.appendChild(portrait);
+
+    // Info
+    const info = document.createElement('div');
+    info.style.cssText = 'flex:1;min-width:0';
+
+    const nameRow = document.createElement('div');
+    nameRow.style.cssText = 'font-size:.85rem;font-weight:600';
+    nameRow.textContent = horse.name;
+    info.appendChild(nameRow);
+
+    // Happiness bar
+    const happyRow = document.createElement('div');
+    happyRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin:3px 0';
+    const happyLabel = document.createElement('span');
+    happyLabel.style.cssText = 'font-size:.7rem;color:var(--text-muted);width:18px';
+    happyLabel.textContent = horse.happiness > 70 ? '\u2764' : horse.happiness > 40 ? '\uD83D\uDE10' : '\uD83D\uDE1E';
+    const happyTrack = document.createElement('div');
+    happyTrack.className = 'stat-track';
+    happyTrack.style.maxWidth = '100px';
+    const happyFill = document.createElement('div');
+    happyFill.className = 'stat-fill';
+    happyFill.style.width = horse.happiness + '%';
+    happyFill.style.background = horse.happiness > 60 ? '#50d890' : horse.happiness > 30 ? '#ffd35c' : '#ff4444';
+    happyTrack.appendChild(happyFill);
+    const happyVal = document.createElement('span');
+    happyVal.style.cssText = 'font-size:.7rem;color:var(--text-muted);font-family:"Courier New",monospace';
+    happyVal.textContent = horse.happiness + '%';
+    happyRow.appendChild(happyLabel);
+    happyRow.appendChild(happyTrack);
+    happyRow.appendChild(happyVal);
+    info.appendChild(happyRow);
+
+    // Status badges
+    const badges = document.createElement('div');
+    badges.style.cssText = 'display:flex;gap:4px;flex-wrap:wrap';
+    if (horse.premiumFed) {
+      const badge = document.createElement('span');
+      badge.className = 'pill pill-stamina';
+      badge.textContent = 'Premium Fed';
+      badges.appendChild(badge);
+    }
+    if (horse.brushed) {
+      const badge = document.createElement('span');
+      badge.className = 'pill pill-agility';
+      badge.textContent = 'Groomed';
+      badges.appendChild(badge);
+    }
+    const careDone = horse.careToday || 0;
+    if (careDone >= 2) {
+      const badge = document.createElement('span');
+      badge.className = 'pill pill-obedience';
+      badge.textContent = 'Fully cared';
+      badges.appendChild(badge);
+    }
+    info.appendChild(badges);
+    card.appendChild(info);
+
+    // Action buttons
+    const actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;flex-shrink:0';
+
+    const careLimitReached = (horse.careToday || 0) >= 2;
+
+    CARE_ACTIONS.forEach(action => {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-muted';
+      btn.style.cssText = 'font-size:.65rem;padding:3px 6px';
+
+      const hasSupply = !action.supply || (state.supplies[action.supply] || 0) > 0;
+      const disabled = careLimitReached || !hasSupply || horse.happiness >= 100;
+
+      btn.textContent = action.name;
+      btn.disabled = disabled;
+      if (!disabled) btn.className = 'btn btn-primary';
+
+      btn.addEventListener('click', () => {
+        doCareAction(horse, action);
+      });
+      actions.appendChild(btn);
+    });
+
+    card.appendChild(actions);
+    c.appendChild(card);
+  });
+
+  // Retired horses section
+  if (state.retired && state.retired.length > 0) {
+    const retTitle = document.createElement('h3');
+    retTitle.style.cssText = 'margin-top:20px;margin-bottom:8px;color:var(--text-muted);cursor:pointer';
+    retTitle.textContent = '\u25B6 Retired Horses (' + state.retired.length + ')';
+    let retOpen = false;
+    const retList = document.createElement('div');
+    retList.style.display = 'none';
+
+    state.retired.forEach(horse => {
+      const row = document.createElement('div');
+      row.style.cssText = 'font-size:.8rem;color:var(--text-muted);padding:4px 0;border-bottom:1px solid var(--border)';
+      row.textContent = horse.name + ' \u2014 ' + horse.coat.fullName + ' ' + horse.breedLabel + ', retired at age ' + Math.floor(horse.age);
+      retList.appendChild(row);
+    });
+
+    retTitle.addEventListener('click', () => {
+      retOpen = !retOpen;
+      retList.style.display = retOpen ? 'block' : 'none';
+      retTitle.textContent = (retOpen ? '\u25BC' : '\u25B6') + ' Retired Horses (' + state.retired.length + ')';
+    });
+
+    c.appendChild(retTitle);
+    c.appendChild(retList);
+  }
+}
+
+function buySupply(key) {
+  const item = CARE_SHOP[key];
+  if (state.money < item.cost) return;
+
+  state.money -= item.cost;
+
+  if (item.type === 'feed') {
+    state.feedStock[item.stock] += item.amount;
+  } else {
+    state.supplies[item.stock] += item.amount;
+  }
+
+  state.eventLog = 'Bought ' + item.name + '.';
+  saveState();
+  renderHeader();
+  renderCareTab();
+}
+
+function doCareAction(horse, action) {
+  if ((horse.careToday || 0) >= 2) return;
+  if (horse.happiness >= 100) return;
+
+  // Consume supply if needed
+  if (action.supply) {
+    if ((state.supplies[action.supply] || 0) <= 0) return;
+    state.supplies[action.supply]--;
+  }
+
+  // Apply happiness
+  horse.happiness = clamp(horse.happiness + action.happiness, 0, 100);
+  horse.careToday = (horse.careToday || 0) + 1;
+
+  // Apply special effect
+  if (action.effect === 'brushed') {
+    horse.brushed = true;
+  } else if (action.effect === 'clearOvertrain') {
+    horse.trainStreak = 0;
+    horse.lastTrainedStat = null;
+  }
+
+  state.eventLog = horse.name + ' enjoyed ' + action.name.toLowerCase() + '! (+' + action.happiness + ' happiness)';
+  saveState();
+  renderCareTab();
+}
+
 /* ── Explore Tab ──────────────────────────────── */
 let selectedBiome = null;
 let encounterState = null; // null | { horse, biomeKey } | 'nothing'
 
 function getStableCap() {
   return state.stableCapacity + state.upgrades.stableSize * 4;
+}
+
+function hasValidLicense() {
+  return state.upgrades.breedLicense && state.upgrades.breedLicense > state.day;
+}
+
+function licenseDaysLeft() {
+  if (!state.upgrades.breedLicense) return 0;
+  return Math.max(0, state.upgrades.breedLicense - state.day);
 }
 
 function getCatchBonus() {
@@ -2476,7 +2819,9 @@ function renderMarketTab() {
 
     const priceRow = document.createElement('div');
     priceRow.className = 'buyer-price';
-    priceRow.textContent = 'Pays up to $' + buyer.basePrice + (buyer.requirements.length > 1 ? ' (full match)' : '');
+    const maxPrice = Math.round(buyer.basePrice * 1.5);
+    const minPrice = Math.round(buyer.basePrice / buyer.requirements.length);
+    priceRow.textContent = buyer.requirements.length > 1 ? '$' + minPrice + '-$' + maxPrice : 'Up to $' + maxPrice;
     card.appendChild(priceRow);
 
     const timer = document.createElement('div');
@@ -2727,6 +3072,52 @@ function renderUpgradesTab() {
     group.appendChild(groupTitle);
 
     items.forEach(upg => {
+      // Special rendering for license (expiry-based, not level-based)
+      if (upg.key === 'breedLicense') {
+        const item = document.createElement('div');
+        item.className = 'upgrade-item';
+        const info = document.createElement('div');
+        info.className = 'upgrade-info';
+        const nameEl = document.createElement('div');
+        nameEl.className = 'upgrade-name';
+        nameEl.textContent = upg.name;
+        const daysLeft = licenseDaysLeft();
+        if (daysLeft > 0) nameEl.textContent += ' \u2713';
+        info.appendChild(nameEl);
+
+        const descEl = document.createElement('div');
+        descEl.className = 'upgrade-desc';
+        if (daysLeft > 5) {
+          descEl.textContent = 'Active \u2014 expires in ' + daysLeft + ' days';
+          descEl.style.color = 'var(--accent)';
+        } else if (daysLeft > 0) {
+          descEl.textContent = 'Expiring soon! ' + daysLeft + ' day' + (daysLeft !== 1 ? 's' : '') + ' left';
+          descEl.style.color = 'var(--gold)';
+        } else if (state.upgrades.breedLicense > 0) {
+          descEl.textContent = 'EXPIRED \u2014 renew to avoid fines';
+          descEl.style.color = 'var(--red)';
+        } else {
+          descEl.textContent = upg.descriptions[0];
+        }
+        info.appendChild(descEl);
+        item.appendChild(info);
+
+        const needsRenew = daysLeft <= 5;
+        const cost = 200;
+        const canAfford = state.money >= cost;
+        if (needsRenew || !state.upgrades.breedLicense) {
+          const buyBtn = document.createElement('button');
+          buyBtn.className = canAfford ? 'btn btn-gold' : 'btn btn-muted';
+          buyBtn.style.cssText = 'font-size:.75rem;padding:4px 10px;white-space:nowrap';
+          buyBtn.textContent = (state.upgrades.breedLicense ? 'Renew' : 'Buy') + ' $' + cost;
+          buyBtn.disabled = !canAfford;
+          buyBtn.addEventListener('click', () => { purchaseUpgrade('breedLicense', cost); });
+          item.appendChild(buyBtn);
+        }
+        group.appendChild(item);
+        return; // skip normal upgrade rendering
+      }
+
       const currentLevel = state.upgrades[upg.key] || 0;
       const maxed = currentLevel >= upg.maxLevel;
       const nextCost = maxed ? null : upg.costs[currentLevel];
@@ -2800,6 +3191,18 @@ function renderUpgradesTab() {
 
 function purchaseUpgrade(key, cost) {
   if (state.money < cost) return;
+
+  // Special handling for license (stores expiry day, not level)
+  if (key === 'breedLicense') {
+    state.money -= cost;
+    state.upgrades.breedLicense = state.day + 15;
+    state.eventLog = 'Breeding license purchased! Valid for 15 days.';
+    saveState();
+    renderHeader();
+    renderUpgradesTab();
+    return;
+  }
+
   const currentLevel = state.upgrades[key] || 0;
   const upg = UPGRADES[key];
   if (currentLevel >= upg.maxLevel) return;
