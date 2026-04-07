@@ -376,7 +376,13 @@ function defaultState() {
 }
 
 function saveState() {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.error('Failed to save game:', e);
+    state.eventLog = 'WARNING: Save failed! Storage may be full. Progress will be lost on refresh.';
+    renderHeader();
+  }
 }
 
 function loadState() {
@@ -388,14 +394,27 @@ function loadState() {
       if (!state.feedStock) state.feedStock = { basic: 0, premium: 0 };
       if (!state.supplies) state.supplies = { treats: 0, brush: 0, appleBasket: 0 };
       if (!state.retired) state.retired = [];
+      // Migrate old boolean breedLicense (was 0 or 1) to expiry-day format
+      if (state.upgrades.breedLicense === 1) {
+        state.upgrades.breedLicense = state.day + 15;
+      }
       state.stable.forEach(h => {
         if (!h.maxAge) h.maxAge = randRange(25, 30);
         if (h.careToday === undefined) h.careToday = 0;
         h.coat = resolveCoatColor(h.genotype, h.age);
       });
+      // Slim retired horses to summary data
+      state.retired = state.retired.map(h => ({
+        name: h.name, breed: h.breed, breedLabel: h.breedLabel,
+        coat: { fullName: h.coat ? h.coat.fullName : 'Unknown' },
+        age: h.age, generation: h.generation,
+      }));
       return true;
     }
-  } catch {}
+  } catch (e) {
+    console.error('Failed to load save data:', e);
+    alert('Your save data was corrupted and could not be loaded. Starting a new game.');
+  }
   return false;
 }
 
@@ -437,7 +456,10 @@ function endDay() {
     // Retirement check
     if (h.maxAge && h.age >= h.maxAge) {
       if (!state.retired) state.retired = [];
-      state.retired.push(h);
+      state.retired.push({
+        name: h.name, breed: h.breed, breedLabel: h.breedLabel,
+        coat: { fullName: h.coat.fullName }, age: h.age, generation: h.generation,
+      });
       state.stable.splice(i, 1);
       daySummary.push(h.name + ' has retired after a full life at age ' + Math.floor(h.age) + '. Farewell, champion.');
     }
@@ -450,15 +472,21 @@ function endDay() {
   let premiumFed = false;
 
   // Basic feed check
-  if (hasAutoFeeder || (state.feedStock && state.feedStock.basic >= horseCount)) {
+  let basicFedCount = 0;
+  if (hasAutoFeeder) {
     basicFed = true;
-    if (!hasAutoFeeder && state.feedStock) state.feedStock.basic -= horseCount;
+    basicFedCount = horseCount;
+  } else if (state.feedStock && state.feedStock.basic >= horseCount) {
+    basicFed = true;
+    basicFedCount = horseCount;
+    state.feedStock.basic -= horseCount;
   } else if (state.feedStock && state.feedStock.basic > 0) {
-    // Partial feed — use what we have, rest go hungry
+    // Partial feed — feed as many as we can
+    basicFedCount = state.feedStock.basic;
     state.feedStock.basic = 0;
   }
 
-  // Premium feed check (only if basic is covered)
+  // Premium feed check (only if ALL horses have basic feed)
   if (basicFed && state.feedStock && state.feedStock.premium >= horseCount) {
     premiumFed = true;
     state.feedStock.premium -= horseCount;
@@ -467,8 +495,9 @@ function endDay() {
   // Apply feed effects + happiness decay
   {
     let unhappy = 0;
-    state.stable.forEach(h => {
-      if (!basicFed) {
+    state.stable.forEach((h, idx) => {
+      const thisFed = basicFed || idx < basicFedCount;
+      if (!thisFed) {
         h.happiness = clamp(h.happiness - 2, 0, 100);
       }
       if (premiumFed) {
@@ -477,6 +506,9 @@ function endDay() {
       }
       if (h.happiness <= 20) unhappy++;
     });
+    if (!basicFed && basicFedCount > 0 && basicFedCount < horseCount) {
+      daySummary.push('Only had enough feed for ' + basicFedCount + ' of ' + horseCount + ' horses.');
+    }
     if (unhappy > 0) daySummary.push(unhappy + ' horse' + (unhappy > 1 ? 's are' : ' is') + ' unhappy!');
   }
 
@@ -496,7 +528,7 @@ function endDay() {
     state.nursery[i].daysLeft--;
     if (state.nursery[i].daysLeft <= 0) {
       const entry = state.nursery[i];
-      const foal = breedHorse(entry.parentAId, entry.parentBId);
+      const foal = breedHorse(entry.parentAId, entry.parentBId, entry.parentAData, entry.parentBData);
       if (foal) {
         state.stable.push(foal);
         newFoals.push(foal);
@@ -762,9 +794,9 @@ function triggerRandomEvent() {
 }
 
 /* ── Breeding ────────────────────────────────── */
-function breedHorse(parentAId, parentBId) {
-  const parentA = state.stable.find(h => h.id === parentAId);
-  const parentB = state.stable.find(h => h.id === parentBId);
+function breedHorse(parentAId, parentBId, parentAData, parentBData) {
+  const parentA = parentAData || state.stable.find(h => h.id === parentAId);
+  const parentB = parentBData || state.stable.find(h => h.id === parentBId);
   if (!parentA || !parentB) return null;
 
   // Inherit genotype
@@ -1525,11 +1557,13 @@ function startBreeding(parentA, parentB) {
 
   state.energy--;
 
-  // Add to nursery
+  // Add to nursery — snapshot parent data so foal can be born even if parents retire/sell
   state.nursery.push({
     parentAId: parentA.id,
     parentBId: parentB.id,
     daysLeft: 5,
+    parentAData: { genotype: parentA.genotype, talents: parentA.talents, breed: parentA.breed, generation: parentA.generation },
+    parentBData: { genotype: parentB.genotype, talents: parentB.talents, breed: parentB.breed, generation: parentB.generation },
   });
 
   // Set cooldowns
@@ -2124,10 +2158,12 @@ function renderCareTab() {
     card.appendChild(info);
 
     const buyBtn = document.createElement('button');
-    const canAfford = state.money >= item.cost;
+    const autoFeederOwned = state.upgrades.autoFeeder > 0;
+    const redundant = key === 'basicFeed' && autoFeederOwned;
+    const canAfford = state.money >= item.cost && !redundant;
     buyBtn.className = canAfford ? 'btn btn-gold' : 'btn btn-muted';
     buyBtn.style.cssText = 'font-size:.75rem;padding:4px 10px;white-space:nowrap';
-    buyBtn.textContent = '$' + item.cost;
+    buyBtn.textContent = redundant ? 'Auto-Feeder' : '$' + item.cost;
     buyBtn.disabled = !canAfford;
     buyBtn.addEventListener('click', () => {
       buySupply(key);
