@@ -330,7 +330,7 @@ const UPGRADES = {
   stableSize:    { name: 'Stable Expansion', maxLevel: 3, costs: [200, 500, 1000],  category: 'facility',  descriptions: ['8 stalls', '12 stalls', '16 stalls'] },
   nurserySize:   { name: 'Nursery Upgrade',  maxLevel: 2, costs: [400, 800],        category: 'facility',  descriptions: ['2 breeding slots', '3 breeding slots'] },
   trainingRing:  { name: 'Training Facility',maxLevel: 2, costs: [500, 1200],       category: 'facility',  descriptions: ['Training Barn (+1 stat/session)', 'Pro Facility (+2 stat, talent hints)'] },
-  autoFeeder:    { name: 'Auto-Feeder',      maxLevel: 1, costs: [350],             category: 'care',      descriptions: ['Stops happiness decay'] },
+  autoFeeder:    { name: 'Auto-Feeder',      maxLevel: 1, costs: [350],             category: 'care',      descriptions: ['Auto basic feed (prevents hunger decay)'] },
   vetOnCall:     { name: 'Vet on Call',       maxLevel: 1, costs: [500],             category: 'care',      descriptions: ['Prevents illness events'] },
   breedLicense:  { name: 'Breeding License',  maxLevel: 1, costs: [200],             category: 'knowledge', descriptions: ['Legal breeding (no fines)'] },
   coatGuide:     { name: 'Coat Genetics Guide',maxLevel: 1, costs: [300],            category: 'knowledge', descriptions: ['Shows genotype on horses'] },
