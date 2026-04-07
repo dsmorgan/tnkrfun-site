@@ -330,7 +330,7 @@ const UPGRADES = {
   stableSize:    { name: 'Stable Expansion', maxLevel: 3, costs: [200, 500, 1000],  category: 'facility',  descriptions: ['8 stalls', '12 stalls', '16 stalls'] },
   nurserySize:   { name: 'Nursery Upgrade',  maxLevel: 2, costs: [400, 800],        category: 'facility',  descriptions: ['2 breeding slots', '3 breeding slots'] },
   trainingRing:  { name: 'Training Facility',maxLevel: 2, costs: [500, 1200],       category: 'facility',  descriptions: ['Training Barn (+1 stat/session)', 'Pro Facility (+2 stat, talent hints)'] },
-  autoFeeder:    { name: 'Auto-Feeder',      maxLevel: 1, costs: [350],             category: 'care',      descriptions: ['Stops happiness decay'] },
+  autoFeeder:    { name: 'Auto-Feeder',      maxLevel: 1, costs: [350],             category: 'care',      descriptions: ['Auto basic feed (prevents hunger decay)'] },
   vetOnCall:     { name: 'Vet on Call',       maxLevel: 1, costs: [500],             category: 'care',      descriptions: ['Prevents illness events'] },
   breedLicense:  { name: 'Breeding License',  maxLevel: 1, costs: [200],             category: 'knowledge', descriptions: ['Legal breeding (no fines)'] },
   coatGuide:     { name: 'Coat Genetics Guide',maxLevel: 1, costs: [300],            category: 'knowledge', descriptions: ['Shows genotype on horses'] },
@@ -401,4 +401,20 @@ const RANDOM_EVENTS = [
   { name: 'Celebrity Buyer',   weight: 3,  effect: 'celebrity',     duration: 1, text: 'A celebrity wants to buy a horse! Premium prices offered.' },
   { name: 'Storm Warning',     weight: 10, effect: 'storm',         duration: 1, text: 'A storm blocks all exploration today.' },
   { name: 'Good Weather',      weight: 15, effect: 'goodWeather',   duration: 1, text: 'Beautiful day! Horses train more effectively today.' },
+];
+
+/* ── Care Shop ───────────────────────────────── */
+const CARE_SHOP = {
+  basicFeed:   { name: 'Basic Feed',      desc: '10 servings \u2014 prevents daily happiness decay', cost: 15,  stock: 'basic',   amount: 10, type: 'feed' },
+  premiumFeed: { name: 'Premium Feed',    desc: '10 servings \u2014 +1 happiness/day & training boost', cost: 40,  stock: 'premium', amount: 10, type: 'feed' },
+  treat:       { name: 'Treats',          desc: 'x5 \u2014 +8 happiness per use',       cost: 10,  stock: 'treats',       amount: 5, type: 'supply' },
+  brush:       { name: 'Grooming Kit',    desc: 'x5 \u2014 +6 happiness & training bonus', cost: 12,  stock: 'brush',        amount: 5, type: 'supply' },
+  appleBasket: { name: 'Apple Basket',    desc: 'x3 \u2014 +12 happiness, clears overtrain', cost: 18, stock: 'appleBasket',  amount: 3, type: 'supply' },
+};
+
+const CARE_ACTIONS = [
+  { key: 'walk',    name: 'Gentle Walk',    desc: 'A calm stroll around the ranch', supply: null,          happiness: 3,  effect: null },
+  { key: 'treat',   name: 'Give Treat',     desc: 'A tasty reward',                 supply: 'treats',      happiness: 8,  effect: null },
+  { key: 'brush',   name: 'Brush & Groom',  desc: 'Coat care + bonding',            supply: 'brush',       happiness: 6,  effect: 'brushed' },
+  { key: 'apple',   name: 'Apple Basket',   desc: 'A whole basket of apples',       supply: 'appleBasket', happiness: 12, effect: 'clearOvertrain' },
 ];
