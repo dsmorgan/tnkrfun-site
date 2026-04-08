@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tinker Impact | tnkr.fun</title>
+<link rel="icon" type="image/x-icon" href="../favicon.ico">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  height:100%;
+  font-family:system-ui,'Segoe UI',Roboto,sans-serif;
+  color:var(--text);background:var(--bg);
+  overflow-x:hidden;
+}
+
+:root{
+  --bg:         #0d0d1a;
+  --bg-card:    #161628;
+  --bg-hover:   #1e1e3a;
+  --bg-input:   #1a1a30;
+  --text:       #E0E8FF;
+  --text-muted: #8890a8;
+  --accent:     #39ff14;
+  --gold:       #ffd35c;
+  --red:        #ff4444;
+  --hp:         #50d890;
+  --border:     rgba(255,255,255,.08);
+  --radius:     8px;
+
+  --rarity-basic:  #9ca3af;
+  --rarity-common: #3b82f6;
+  --rarity-rare:   #ffcc33;
+  --rarity-epic:   #a855f7;
+
+  --class-knight: #c0a060;
+  --class-mage:   #6ea0ff;
+  --class-rogue:  #8b5cf6;
+  --class-healer: #50d890;
+}
+
+/* ── Icon tint system ──
+   Hero/enemy portraits are <div class="ti-icon"> with a CSS mask-image of
+   the SVG silhouette. Background color is tinted by tier class. */
+.ti-icon{
+  width:64px;height:64px;
+  -webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;
+  -webkit-mask-position:center;mask-position:center;
+  -webkit-mask-size:contain;mask-size:contain;
+  background:#9ca3af;
+}
+/* Hero rarity tints */
+.tint-basic{
+  background:linear-gradient(180deg,#cfd5df 0%,#9ca3af 50%,#6b7280 100%);
+}
+.tint-common{
+  background:linear-gradient(180deg,#7ec0ff 0%,#3b82f6 50%,#1d4ed8 100%);
+  filter:drop-shadow(0 0 4px rgba(59,130,246,.55));
+}
+.tint-rare{
+  background:linear-gradient(180deg,#fff2a8 0%,#ffcc33 45%,#ff9500 100%);
+  filter:drop-shadow(0 0 8px rgba(255,200,40,.9));
+  animation:tintPulseGold 1.8s ease-in-out infinite;
+}
+.tint-epic{
+  background:linear-gradient(180deg,#e9b8ff 0%,#a855f7 50%,#6b21a8 100%);
+  filter:drop-shadow(0 0 10px rgba(192,132,252,.9));
+  animation:tintPulsePurple 1.6s ease-in-out infinite;
+}
+@keyframes tintPulseGold{
+  0%,100%{filter:drop-shadow(0 0 4px rgba(255,170,0,.6))  drop-shadow(0 0 2px rgba(255,170,0,.4))}
+  50%   {filter:drop-shadow(0 0 20px rgba(255,220,100,1)) drop-shadow(0 0 8px rgba(255,200,40,.8))}
+}
+@keyframes tintPulsePurple{
+  0%,100%{filter:drop-shadow(0 0 5px rgba(150,70,230,.7))  drop-shadow(0 0 2px rgba(150,70,230,.5))}
+  50%   {filter:drop-shadow(0 0 22px rgba(216,160,255,1)) drop-shadow(0 0 8px rgba(192,132,252,.9))}
+}
+/* Enemy type tints (A–G) */
+.tint-A{background:linear-gradient(180deg,#bbf7a8 0%,#84cc16 50%,#4d7c0f 100%)}
+.tint-B{background:linear-gradient(180deg,#86efac 0%,#22c55e 50%,#15803d 100%)}
+.tint-C{
+  background:linear-gradient(180deg,#5eead4 0%,#10b981 50%,#064e3b 100%);
+  filter:drop-shadow(0 0 8px rgba(94,234,212,.9));
+  animation:tintPulseGreen 2.2s ease-in-out infinite;
+}
+.tint-D{background:linear-gradient(180deg,#bae6fd 0%,#7dd3fc 50%,#0369a1 100%)}
+.tint-E{background:linear-gradient(180deg,#7dd3fc 0%,#0ea5e9 50%,#075985 100%)}
+.tint-F{
+  background:linear-gradient(180deg,#60a5fa 0%,#1e40af 50%,#1e3a8a 100%);
+  filter:drop-shadow(0 0 8px rgba(96,165,250,.9));
+  animation:tintPulseDeepBlue 2s ease-in-out infinite;
+}
+.tint-G{
+  background:linear-gradient(180deg,#fca5a5 0%,#ef4444 50%,#991b1b 100%);
+  filter:drop-shadow(0 0 10px rgba(252,165,165,1));
+  animation:tintPulseRed 1.2s ease-in-out infinite;
+}
+@keyframes tintPulseGreen{
+  0%,100%{filter:drop-shadow(0 0 4px rgba(16,185,129,.55)) drop-shadow(0 0 2px rgba(16,185,129,.4))}
+  50%   {filter:drop-shadow(0 0 18px rgba(94,234,212,1))   drop-shadow(0 0 7px rgba(94,234,212,.9))}
+}
+@keyframes tintPulseDeepBlue{
+  0%,100%{filter:drop-shadow(0 0 5px rgba(30,64,175,.65))  drop-shadow(0 0 2px rgba(30,64,175,.4))}
+  50%   {filter:drop-shadow(0 0 20px rgba(96,165,250,1))   drop-shadow(0 0 8px rgba(96,165,250,.9))}
+}
+@keyframes tintPulseRed{
+  0%,100%{filter:drop-shadow(0 0 5px rgba(239,68,68,.7))   drop-shadow(0 0 2px rgba(239,68,68,.5))}
+  50%   {filter:drop-shadow(0 0 22px rgba(252,165,165,1))  drop-shadow(0 0 10px rgba(239,68,68,.9))}
+}
+
+.mono{font-family:'Courier New',monospace}
+h1{font-size:1.1rem;font-weight:700;letter-spacing:.04em}
+h2{font-size:1rem;font-weight:600;margin-bottom:.5em;color:var(--accent)}
+h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
+
+/* Header */
+.header{
+  position:sticky;top:0;z-index:100;
+  background:var(--bg);
+  border-bottom:1px solid var(--border);
+  padding:10px 16px;
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+}
+.header h1{color:var(--accent);white-space:nowrap}
+.header-stats{
+  display:flex;gap:16px;font-size:.85rem;
+  font-family:'Courier New',monospace;
+  color:var(--text-muted);
+}
+.header-stats span{white-space:nowrap}
+.header-stats .gold{color:var(--gold)}
+.header-stats .pulls{color:var(--accent)}
+
+/* Tabs */
+.tabs{
+  display:flex;gap:2px;padding:0 16px;
+  background:var(--bg);
+  border-bottom:1px solid var(--border);
+  overflow-x:auto;
+}
+.tab-btn{
+  padding:8px 14px;font-size:.8rem;
+  font-family:'Courier New',monospace;
+  color:var(--text-muted);background:transparent;
+  border:none;border-bottom:2px solid transparent;
+  cursor:pointer;white-space:nowrap;
+  transition:color .15s,border-color .15s;
+}
+.tab-btn:hover{color:var(--text)}
+.tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab-btn:disabled{opacity:.4;cursor:not-allowed}
+
+.tab-content{display:none;padding:16px;min-height:calc(100vh - 140px)}
+.tab-content.active{display:block}
+
+/* Footer */
+.footer{
+  position:sticky;bottom:0;z-index:100;
+  background:var(--bg);
+  border-top:1px solid var(--border);
+  padding:10px 16px;
+  display:flex;align-items:center;gap:12px;
+  font-size:.85rem;
+}
+.footer .event-log{
+  flex:1;color:var(--text-muted);
+  font-family:'Courier New',monospace;
+  font-style:italic;font-size:.8rem;
+  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;
+}
+
+/* Buttons */
+.btn{
+  padding:6px 14px;font-size:.8rem;
+  font-family:'Courier New',monospace;
+  border:1px solid;border-radius:var(--radius);
+  cursor:pointer;transition:background .15s;
+  text-transform:uppercase;letter-spacing:.04em;
+  background:transparent;
+}
+.btn-primary{color:var(--accent);background:rgba(57,255,20,.08);border-color:rgba(57,255,20,.4)}
+.btn-primary:hover{background:rgba(57,255,20,.18)}
+.btn-gold{color:var(--gold);background:rgba(255,211,92,.08);border-color:rgba(255,211,92,.4)}
+.btn-gold:hover{background:rgba(255,211,92,.18)}
+.btn-danger{color:var(--red);background:rgba(255,68,68,.08);border-color:rgba(255,68,68,.3)}
+.btn-danger:hover{background:rgba(255,68,68,.18)}
+.btn-muted{color:var(--text-muted);background:rgba(255,255,255,.04);border-color:var(--border)}
+.btn-muted:hover{background:rgba(255,255,255,.08)}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+
+/* Hero card */
+.hero-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+  gap:12px;
+}
+.hero-card{
+  background:var(--bg-card);
+  border-radius:var(--radius);
+  border:2px solid var(--rarity-common);
+  padding:10px;
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  cursor:pointer;
+  transition:background .15s,transform .15s;
+  position:relative;
+}
+.hero-card:hover{background:var(--bg-hover);transform:translateY(-2px)}
+.hero-card.rarity-basic{border-color:var(--rarity-basic)}
+.hero-card.rarity-common{border-color:var(--rarity-common);box-shadow:0 0 10px rgba(59,130,246,.35)}
+.hero-card.rarity-rare{
+  border-color:var(--rarity-rare);
+  animation:cardPulseGold 1.8s ease-in-out infinite;
+}
+.hero-card.rarity-epic{
+  border-color:var(--rarity-epic);
+  animation:cardPulsePurple 1.6s ease-in-out infinite;
+}
+@keyframes cardPulseGold{
+  0%,100%{box-shadow:0 0 8px rgba(255,179,0,.35), inset 0 0 6px rgba(255,179,0,.1)}
+  50%   {box-shadow:0 0 24px rgba(255,220,100,.85), inset 0 0 14px rgba(255,220,100,.25)}
+}
+@keyframes cardPulsePurple{
+  0%,100%{box-shadow:0 0 10px rgba(168,85,247,.4), inset 0 0 8px rgba(168,85,247,.12)}
+  50%   {box-shadow:0 0 28px rgba(216,160,255,.9), inset 0 0 16px rgba(216,160,255,.3)}
+}
+.hero-card.locked{opacity:.35;filter:grayscale(1)}
+.hero-card.selected{outline:2px solid var(--accent);outline-offset:2px}
+
+.hero-portrait{
+  width:64px;height:64px;
+  display:flex;align-items:center;justify-content:center;
+  border-radius:50%;
+  background:rgba(255,255,255,.04);
+}
+.hero-portrait svg{width:48px;height:48px}
+.hero-portrait.class-knight{color:var(--class-knight)}
+.hero-portrait.class-mage{color:var(--class-mage)}
+.hero-portrait.class-rogue{color:var(--class-rogue)}
+.hero-portrait.class-healer{color:var(--class-healer)}
+
+.hero-name{font-weight:600;font-size:.85rem;text-align:center}
+.hero-class{font-size:.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.hero-stars{font-size:.7rem;letter-spacing:1px}
+.hero-stars.rarity-basic{color:var(--rarity-basic)}
+.hero-stars.rarity-common{color:var(--rarity-common)}
+.hero-stars.rarity-rare{color:var(--rarity-rare)}
+.hero-stars.rarity-epic{color:var(--rarity-epic)}
+.hero-level{
+  font-size:.65rem;font-family:'Courier New',monospace;
+  color:var(--gold);
+}
+.hero-shards{font-size:.65rem;color:var(--text-muted);font-family:'Courier New',monospace}
+
+/* Team tab */
+.team-slots{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:12px;margin-bottom:20px;
+}
+.team-slot{
+  background:var(--bg-card);border-radius:var(--radius);
+  padding:14px;text-align:center;min-height:160px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  border:2px dashed var(--border);cursor:pointer;
+  transition:border-color .15s;
+}
+.team-slot:hover{border-color:rgba(255,255,255,.2)}
+.team-slot.filled{border-style:solid;border-color:rgba(57,255,20,.3)}
+.team-slot-empty{color:var(--text-muted);font-size:.8rem}
+
+/* Summon tab */
+.summon-panel{
+  background:var(--bg-card);border-radius:var(--radius);
+  padding:20px;text-align:center;margin-bottom:20px;
+}
+.summon-rates{
+  font-size:.75rem;color:var(--text-muted);
+  font-family:'Courier New',monospace;
+  margin-top:12px;
+}
+.summon-buttons{display:flex;gap:10px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.summon-results{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));
+  gap:10px;margin-top:20px;
+}
+
+/* Campaign tab */
+.chapter{
+  background:var(--bg-card);border-radius:var(--radius);
+  padding:14px;margin-bottom:14px;
+}
+.chapter-name{font-weight:600;font-size:.95rem;margin-bottom:8px;color:var(--gold)}
+.stage-list{display:flex;flex-wrap:wrap;gap:8px}
+.stage-btn{
+  padding:8px 12px;font-size:.75rem;
+  font-family:'Courier New',monospace;
+  background:var(--bg-input);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  color:var(--text);cursor:pointer;
+  min-width:90px;
+}
+.stage-btn:hover:not(:disabled){background:var(--bg-hover);border-color:var(--accent)}
+.stage-btn.cleared{color:var(--accent);border-color:rgba(57,255,20,.3)}
+.stage-btn.current{border-color:var(--gold);box-shadow:0 0 8px rgba(255,211,92,.3)}
+.stage-btn:disabled{opacity:.35;cursor:not-allowed}
+
+/* Battle view */
+.battle-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.85);
+  z-index:200;
+  display:none;
+  align-items:center;justify-content:center;
+  padding:20px;
+}
+.battle-overlay.active{display:flex}
+.battle-arena{
+  background:var(--bg-card);
+  border-radius:var(--radius);
+  padding:20px;
+  width:100%;max-width:600px;
+  display:flex;flex-direction:column;gap:14px;
+}
+.battle-side{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:10px;
+}
+.battle-divider{
+  text-align:center;color:var(--text-muted);
+  font-family:'Courier New',monospace;font-size:.75rem;
+}
+.battle-unit{
+  background:var(--bg-input);
+  border-radius:var(--radius);
+  padding:8px;
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  position:relative;
+  border:2px solid transparent;
+  transition:transform .15s,border-color .15s;
+}
+.battle-unit.active{border-color:var(--accent);transform:scale(1.05)}
+.battle-unit.dead{opacity:.3;filter:grayscale(1)}
+.battle-unit .portrait{width:40px;height:40px;display:flex;align-items:center;justify-content:center}
+.battle-unit .portrait svg{width:36px;height:36px}
+.battle-unit .name{font-size:.7rem;font-weight:600;text-align:center;line-height:1.1}
+.hp-bar{
+  width:100%;height:8px;
+  background:rgba(0,0,0,.4);
+  border-radius:4px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.1);
+}
+.hp-fill{
+  height:100%;background:var(--hp);
+  transition:width .3s;border-radius:4px;
+}
+.hp-fill.low{background:var(--red)}
+.hp-text{font-size:.6rem;font-family:'Courier New',monospace;color:var(--text-muted)}
+
+/* Floating damage numbers */
+.float-num{
+  position:absolute;
+  top:0;left:50%;
+  transform:translateX(-50%);
+  font-family:'Courier New',monospace;
+  font-weight:700;font-size:.95rem;
+  pointer-events:none;
+  animation:floatUp 1s ease-out forwards;
+  text-shadow:0 0 4px #000,0 0 4px #000;
+}
+.float-num.dmg{color:var(--red)}
+.float-num.heal{color:var(--hp)}
+@keyframes floatUp{
+  0%   {transform:translate(-50%,0);opacity:1}
+  100% {transform:translate(-50%,-30px);opacity:0}
+}
+
+.battle-result{
+  text-align:center;padding:14px;
+  font-family:'Courier New',monospace;
+}
+.battle-result.victory{color:var(--accent)}
+.battle-result.defeat{color:var(--red)}
+
+/* Modal (for hero detail / pull results) */
+.modal-overlay{
+  position:fixed;inset:0;
+  background:rgba(0,0,0,.7);
+  z-index:300;
+  display:none;
+  align-items:center;justify-content:center;
+  padding:20px;
+}
+.modal-overlay.active{display:flex}
+.modal{
+  background:var(--bg-card);
+  border-radius:var(--radius);
+  padding:20px;
+  max-width:500px;width:100%;
+  max-height:90vh;overflow-y:auto;
+  border:1px solid var(--border);
+}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
+
+/* Tower */
+.tower-panel{
+  background:var(--bg-card);border-radius:var(--radius);
+  padding:20px;text-align:center;
+}
+.tower-floor{
+  font-size:1.4rem;color:var(--gold);
+  font-family:'Courier New',monospace;margin:10px 0;
+}
+
+/* Mobile */
+@media(max-width:700px){
+  .hero-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .team-slots{gap:8px}
+  .team-slot{min-height:130px;padding:10px}
+  .header{padding:8px 12px;gap:8px}
+  .header-stats{font-size:.75rem;gap:10px}
+  .tab-btn{padding:6px 10px;font-size:.75rem}
+  .tab-content{padding:12px}
+  .battle-side{gap:6px}
+  .battle-unit{padding:6px}
+}
+</style>
+</head>
+<body>
+
+<header class="header">
+  <h1 class="mono">TINKER IMPACT</h1>
+  <div class="header-stats">
+    <span class="gold">Gold <strong id="goldDisplay">0</strong></span>
+    <span class="pulls">Pulls <strong id="pullsDisplay">0</strong></span>
+    <span>Heroes <strong id="heroesDisplay">0/15</strong></span>
+  </div>
+</header>
+
+<nav class="tabs" id="tabNav">
+  <button class="tab-btn active" data-tab="team">Team</button>
+  <button class="tab-btn" data-tab="summon">Summon</button>
+  <button class="tab-btn" data-tab="campaign">Campaign</button>
+  <button class="tab-btn" data-tab="tower" id="towerTabBtn" disabled>Tower</button>
+  <button class="tab-btn" data-tab="collection">Collection</button>
+</nav>
+
+<main>
+  <div class="tab-content active" id="tab-team"></div>
+  <div class="tab-content" id="tab-summon"></div>
+  <div class="tab-content" id="tab-campaign"></div>
+  <div class="tab-content" id="tab-tower"></div>
+  <div class="tab-content" id="tab-collection"></div>
+</main>
+
+<footer class="footer">
+  <div class="event-log" id="eventLog">A wandering scribe hands you a summoning charter and three coppers. Best of luck.</div>
+  <a href="https://game-icons.net" target="_blank" rel="noopener" style="font-size:.65rem;color:var(--text-muted);text-decoration:none;font-family:'Courier New',monospace">Icons: game-icons.net (CC BY 3.0)</a>
+  <button class="btn btn-danger" id="resetBtn" style="font-size:.7rem;padding:4px 10px;opacity:.6">Reset</button>
+</footer>
+
+<!-- Battle overlay -->
+<div class="battle-overlay" id="battleOverlay">
+  <div class="battle-arena" id="battleArena"></div>
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<script src="icon-data.js"></script>
+<script src="data.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
