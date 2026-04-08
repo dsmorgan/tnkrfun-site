@@ -191,7 +191,7 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
 /* Hero card */
 .hero-grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(160px,1fr));
+  grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
   gap:12px;
 }
 .hero-card{
@@ -207,14 +207,11 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
 .hero-card:hover{background:var(--bg-hover);transform:translateY(-2px)}
 .hero-card.rarity-basic{border-color:var(--rarity-basic)}
 .hero-card.rarity-common{border-color:var(--rarity-common);box-shadow:0 0 10px rgba(59,130,246,.35)}
-.hero-card.rarity-rare{
-  border-color:var(--rarity-rare);
-  animation:cardPulseGold 1.8s ease-in-out infinite;
-}
-.hero-card.rarity-epic{
-  border-color:var(--rarity-epic);
-  animation:cardPulsePurple 1.6s ease-in-out infinite;
-}
+.hero-card.rarity-rare{border-color:var(--rarity-rare)}
+.hero-card.rarity-epic{border-color:var(--rarity-epic)}
+.hero-card.rarity-rare:not(.locked){animation:cardPulseGold 1.8s ease-in-out infinite}
+.hero-card.rarity-epic:not(.locked){animation:cardPulsePurple 1.6s ease-in-out infinite}
+.hero-card.locked .ti-icon{animation:none!important;filter:grayscale(1) brightness(.5)}
 @keyframes cardPulseGold{
   0%,100%{box-shadow:0 0 8px rgba(255,179,0,.35), inset 0 0 6px rgba(255,179,0,.1)}
   50%   {box-shadow:0 0 24px rgba(255,220,100,.85), inset 0 0 14px rgba(255,220,100,.25)}
@@ -249,12 +246,71 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   font-size:.65rem;font-family:'Courier New',monospace;
   color:var(--gold);
 }
+.hero-max{
+  display:inline-block;margin-left:4px;
+  font-size:.55rem;font-weight:700;
+  color:var(--accent);
+  padding:0 4px;border:1px solid rgba(57,255,20,.4);border-radius:3px;
+  text-transform:uppercase;letter-spacing:.05em;
+}
+.hero-stats{
+  width:100%;
+  display:flex;flex-direction:column;gap:1px;
+  font-family:'Courier New',monospace;
+  font-size:.62rem;
+  padding:4px 6px;
+  background:rgba(0,0,0,.25);
+  border-radius:3px;
+  margin-top:2px;
+}
+.hero-stats .stat-row{
+  display:grid;
+  grid-template-columns:28px 34px 1fr;
+  align-items:center;gap:6px;
+  color:var(--text-muted);
+}
+.hero-stats .stat-k{color:var(--text-muted);letter-spacing:.05em}
+.hero-stats .stat-v{color:var(--text);font-weight:600;text-align:right}
+.hero-stats .stat-mult{color:var(--accent);font-weight:400;font-size:.55rem;text-align:left}
 .hero-shards{font-size:.65rem;color:var(--text-muted);font-family:'Courier New',monospace}
+
+/* Class sections (Team + Collection grouping) */
+.class-section{
+  margin-top:14px;
+  padding:10px 12px 12px 12px;
+  background:rgba(255,255,255,.015);
+  border-radius:var(--radius);
+}
+.class-section-header{
+  font-family:'Courier New',monospace;
+  font-size:.85rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.08em;
+  margin-bottom:8px;
+  display:flex;align-items:baseline;gap:8px;
+}
+.class-section-header .class-count{
+  font-size:.7rem;color:var(--text-muted);font-weight:400;
+}
 
 /* Team tab */
 .team-slots{
-  display:grid;grid-template-columns:repeat(3,1fr);
+  display:grid;
   gap:12px;margin-bottom:20px;
+}
+.team-slots.slots-3{grid-template-columns:repeat(3,1fr)}
+.team-slots.slots-4{grid-template-columns:repeat(4,1fr)}
+.team-slot.locked{opacity:.5;border-style:dashed;cursor:not-allowed}
+.passives-box{
+  background:var(--bg-card);
+  border-radius:var(--radius);
+  padding:10px 14px;
+  margin-bottom:20px;
+  font-family:'Courier New',monospace;font-size:.72rem;
+}
+.passives-title{color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em}
+.passives-grid{
+  display:grid;grid-template-columns:repeat(2,1fr);gap:4px 14px;
+  color:var(--text);
 }
 .team-slot{
   background:var(--bg-card);border-radius:var(--radius);
@@ -322,8 +378,8 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   display:flex;flex-direction:column;gap:14px;
 }
 .battle-side{
-  display:grid;grid-template-columns:repeat(3,1fr);
-  gap:10px;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));
+  gap:8px;
 }
 .battle-divider{
   text-align:center;color:var(--text-muted);
@@ -414,7 +470,9 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
 /* Mobile */
 @media(max-width:700px){
   .hero-grid{grid-template-columns:repeat(2,1fr);gap:8px}
+  .team-slots.slots-3,.team-slots.slots-4{grid-template-columns:repeat(2,1fr)}
   .team-slots{gap:8px}
+  .passives-grid{grid-template-columns:1fr}
   .team-slot{min-height:130px;padding:10px}
   .header{padding:8px 12px;gap:8px}
   .header-stats{font-size:.75rem;gap:10px}

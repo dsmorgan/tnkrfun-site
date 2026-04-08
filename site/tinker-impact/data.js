@@ -6,18 +6,21 @@
 // ───────────────────────────────────────────────
 // Rarity tiers (4-tier system: Basic / Common / Rare / Epic)
 // ───────────────────────────────────────────────
+// Rarity: per-level multiplier is flat 0.15 (see LEVEL_MULT).
+// No per-rarity stat multiplier — rarity instead determines start & max level.
 const RARITY = {
-  basic:  { weight:  0, label: 'Basic',  stars: 1, statMult: 0.85, tint: 'basic' },
-  common: { weight: 70, label: 'Common', stars: 1, statMult: 1.00, tint: 'common' },
-  rare:   { weight: 25, label: 'Rare',   stars: 2, statMult: 1.30, tint: 'rare' },
-  epic:   { weight:  5, label: 'Epic',   stars: 3, statMult: 1.65, tint: 'epic' },
+  basic:  { weight:  0, label: 'Basic',  stars: 1, tint: 'basic',  startLevel: 1, maxLevel: 5  },
+  common: { weight: 70, label: 'Common', stars: 1, tint: 'common', startLevel: 1, maxLevel: 8  },
+  rare:   { weight: 25, label: 'Rare',   stars: 2, tint: 'rare',   startLevel: 3, maxLevel: 9  },
+  epic:   { weight:  5, label: 'Epic',   stars: 3, tint: 'epic',   startLevel: 5, maxLevel: 10 },
 };
 
 const PITY_SOFT_THRESHOLD = 8;
 const PULL_COST = 100;
 const PULL_COST_10 = 900;
 const SHARDS_PER_LEVEL = 5;
-const MAX_LEVEL = 10;
+const LEVEL_MULT = 0.15; // stat = base × (1 + (level - 1) × LEVEL_MULT)
+const MAX_LEVEL_EVER = 10; // absolute ceiling across all tiers
 
 // ───────────────────────────────────────────────
 // Classes
@@ -312,11 +315,11 @@ const CAMPAIGN = [
     id: 3,
     name: 'The Shadow Keep',
     stages: [
-      { id: '3-1', name: 'Outer Walls',   enemies: [enemy('shadow-guard', 5), enemy('shadow-guard', 5), enemy('shadow-archer', 5)] },
-      { id: '3-2', name: 'Cursed Halls',  enemies: [enemy('wraith', 6), enemy('wraith', 6), enemy('cult-healer', 5)] },
-      { id: '3-3', name: 'Throne Room',   enemies: [enemy('cult-mage', 6), enemy('cult-mage', 6), enemy('shadow-knight', 6)] },
-      { id: '3-4', name: 'Inner Sanctum', enemies: [enemy('high-priest', 5), enemy('shadow-knight', 7), enemy('wraith', 7)] },
-      { id: '3-5', name: 'The Shadow Lord', enemies: [enemy('the-shadow-lord', 6), enemy('shadow-knight', 8), enemy('wraith', 8)] },
+      { id: '3-1', name: 'Outer Walls',   enemies: [enemy('shadow-guard', 5), enemy('shadow-guard', 5), enemy('shadow-archer', 5), enemy('shadow-archer', 5)] },
+      { id: '3-2', name: 'Cursed Halls',  enemies: [enemy('wraith', 6), enemy('wraith', 6), enemy('cult-healer', 5), enemy('shadow-guard', 5)] },
+      { id: '3-3', name: 'Throne Room',   enemies: [enemy('cult-mage', 6), enemy('cult-mage', 6), enemy('shadow-knight', 6), enemy('shadow-archer', 6), enemy('cult-healer', 6)] },
+      { id: '3-4', name: 'Inner Sanctum', enemies: [enemy('high-priest', 5), enemy('shadow-knight', 7), enemy('wraith', 7), enemy('cult-mage', 6), enemy('wraith', 7)] },
+      { id: '3-5', name: 'The Shadow Lord', enemies: [enemy('the-shadow-lord', 6), enemy('shadow-knight', 8), enemy('shadow-knight', 8), enemy('wraith', 8), enemy('cult-healer', 7)] },
     ],
   },
 ];

@@ -19,7 +19,7 @@ function defaultState() {
     version: STATE_VERSION,
     gold: 300,                          // enough for 3 single pulls to start
     owned,
-    team: [...starters],                // pre-filled starter team
+    team: [...starters, null],          // 4-slot team (slot 4 enabled after Ch2)
     campaign: { chapter: 1, stage: 1 }, // next stage to attempt
     cleared: {},                        // stageId -> true
     tower: { unlocked: false, floor: 1, best: 0 },
@@ -46,13 +46,28 @@ function loadState() {
   const def = defaultState();
   state = { ...def, ...loaded };
   state.owned = loaded.owned || {};
-  state.team = Array.isArray(loaded.team) && loaded.team.length === 3 ? loaded.team : [null, null, null];
+  // Team is now 4 slots; pad older 3-slot saves.
+  if (Array.isArray(loaded.team)) {
+    state.team = loaded.team.slice(0, 4);
+    while (state.team.length < 4) state.team.push(null);
+  } else {
+    state.team = [null, null, null, null];
+  }
   state.campaign = loaded.campaign && typeof loaded.campaign === 'object' ? { ...def.campaign, ...loaded.campaign } : def.campaign;
   state.cleared = loaded.cleared || {};
   state.tower = loaded.tower && typeof loaded.tower === 'object' ? { ...def.tower, ...loaded.tower } : def.tower;
   state.gacha = loaded.gacha && typeof loaded.gacha === 'object' ? { ...def.gacha, ...loaded.gacha } : def.gacha;
 
   state.team = state.team.map(id => (id && state.owned[id]) ? id : null);
+  // Clamp owned levels to new per-rarity caps (applied going forward).
+  for (const id of Object.keys(state.owned)) {
+    const hero = heroById(id);
+    if (!hero) continue;
+    const cap = RARITY[hero.rarity].maxLevel;
+    const start = RARITY[hero.rarity].startLevel;
+    if (state.owned[id].level > cap) state.owned[id].level = cap;
+    if (state.owned[id].level < start) state.owned[id].level = start;
+  }
 }
 
 // ───────────────────────────────────────────────
@@ -61,15 +76,55 @@ function loadState() {
 
 function heroById(id) { return HEROES.find(h => h.id === id) || null; }
 
+// Team size: starts at 3, unlocks to 4 after clearing stage 2-5.
+function teamSlotCount() {
+  return state.cleared && state.cleared['2-5'] ? 4 : 3;
+}
+
+// Class passives — applied once at battle start to the allied units.
+//   Knight : all allies get +10% max HP (teamwide aura)
+//   Mage   : mages deal +25% AoE damage (atk +25% applied to the mage unit only)
+//   Rogue  : first-strike — rogues act at t=0 (before everyone)
+//   Healer : passive regen +3 HP per ally per action (applied post-action via flag)
+function applyClassPassives(allies) {
+  const hasKnight = allies.some(u => u.class === 'knight' && u.hp > 0);
+  const hasHealer = allies.some(u => u.class === 'healer' && u.hp > 0);
+  if (hasKnight) {
+    allies.forEach(u => {
+      const bonus = Math.round(u.maxHp * 0.10);
+      u.maxHp += bonus; u.hp += bonus;
+    });
+  }
+  allies.forEach(u => {
+    if (u.class === 'mage')  u.atk = Math.round(u.atk * 1.25);
+    if (u.class === 'rogue') u.nextAct = 0; // first strike
+  });
+  if (hasHealer) allies.forEach(u => { u.regen = 3; });
+}
+
+// New stat formula (simplified): no per-rarity multiplier.
+// Rarity determines the hero's starting and max level; the per-level
+// multiplier is a flat LEVEL_MULT (0.15) across all tiers.
 function heroStats(source, level = 1) {
   const klass = CLASSES[source.class];
-  const mult = RARITY[source.rarity].statMult;
-  const lvlMult = 1 + (level - 1) * 0.10;
+  const lvlMult = 1 + (level - 1) * LEVEL_MULT;
   return {
-    hp:  Math.round(klass.baseHp  * mult * lvlMult),
-    atk: Math.round(klass.baseAtk * mult * lvlMult),
+    hp:  Math.round(klass.baseHp  * lvlMult),
+    atk: Math.round(klass.baseAtk * lvlMult),
     spd: klass.baseSpd,
   };
+}
+
+// Class-specific effective action stats derived from ATK.
+// Returned fields: primary label, raw, effective (after class multiplier).
+function effectiveActionStat(klass, atk) {
+  switch (klass) {
+    case 'knight': return { label: 'ATK',  raw: atk, mult: 0.9,  eff: Math.max(1, Math.round(atk * 0.9)) };
+    case 'rogue':  return { label: 'ATK',  raw: atk, mult: 1.3,  eff: Math.max(1, Math.round(atk * 1.3)) };
+    case 'mage':   return { label: 'AoE',  raw: atk, mult: 0.75, eff: Math.max(1, Math.round(atk * 0.75)) };
+    case 'healer': return { label: 'HEAL', raw: atk, mult: 3.0,  eff: Math.max(1, Math.round(atk * 3.0)) };
+    default:       return { label: 'ATK',  raw: atk, mult: 1.0,  eff: atk };
+  }
 }
 
 function ownedCount() { return Object.keys(state.owned).length; }
@@ -110,8 +165,23 @@ function heroCardHTML(hero, owned, opts) {
   const lockedClass = owned ? '' : ' locked';
   const selectedClass = opts.selected ? ' selected' : '';
   const stars = '★'.repeat(RARITY[hero.rarity].stars);
-  const lvl = owned ? `<div class="hero-level">Lv ${owned.level}</div>` : '';
+  const cap = RARITY[hero.rarity].maxLevel;
+  const level = owned ? owned.level : RARITY[hero.rarity].startLevel;
+  const atMax = owned && owned.level >= cap;
+  const lvl = owned
+    ? `<div class="hero-level">Lv ${owned.level}${atMax ? ' <span class="hero-max">max</span>' : ''}</div>`
+    : '';
   const shards = owned ? `<div class="hero-shards">${owned.shards} shards</div>` : '';
+  // Stats block: shows HP, primary action (ATK/AoE/HEAL with multiplier), SPD
+  const s = heroStats(hero, level);
+  const act = effectiveActionStat(hero.class, s.atk);
+  const multSpan = act.mult !== 1 ? `<span class="stat-mult">×${act.mult} = ${act.eff}</span>` : '<span></span>';
+  const statsBlock = `
+    <div class="hero-stats">
+      <div class="stat-row"><span class="stat-k">HP</span><span class="stat-v">${s.hp}</span><span></span></div>
+      <div class="stat-row"><span class="stat-k">${act.label}</span><span class="stat-v">${act.raw}</span>${multSpan}</div>
+      <div class="stat-row"><span class="stat-k">SPD</span><span class="stat-v">${s.spd}</span><span></span></div>
+    </div>`;
   return `
     <div class="hero-card rarity-${hero.rarity}${lockedClass}${selectedClass}" data-hero-id="${hero.id}">
       ${heroPortrait(hero)}
@@ -119,6 +189,7 @@ function heroCardHTML(hero, owned, opts) {
       <div class="hero-class">${hero.class}</div>
       <div class="hero-stars rarity-${hero.rarity}">${stars}</div>
       ${lvl}
+      ${statsBlock}
       ${shards}
     </div>
   `;
@@ -154,7 +225,8 @@ function singlePull(forceRarePlus) {
   state.gacha.totalPulls++;
 
   if (!state.owned[hero.id]) {
-    state.owned[hero.id] = { level: 1, shards: 0 };
+    const startLevel = RARITY[hero.rarity].startLevel;
+    state.owned[hero.id] = { level: startLevel, shards: 0 };
     return { hero, isNew: true };
   } else {
     state.owned[hero.id].shards++;
@@ -247,12 +319,16 @@ function rollEnemyVariant(stageEntry) {
 }
 
 function startBattle(kind, payload) {
-  const allyHeroes = state.team.map(id => id ? heroById(id) : null);
+  // Active slots: 3 until Ch2 cleared (2-5), then 4.
+  const slotCount = teamSlotCount();
+  const activeTeam = state.team.slice(0, slotCount);
+  const allyHeroes = activeTeam.map(id => id ? heroById(id) : null);
   if (!allyHeroes.every(Boolean)) {
-    setLog('Fill all 3 team slots before battling.');
+    setLog(`Fill all ${slotCount} team slots before battling.`);
     return;
   }
   const allies = allyHeroes.map((h, i) => makeUnit(h, state.owned[h.id].level, 'ally', i));
+  applyClassPassives(allies);
   let enemies;
   if (kind === 'stage') {
     enemies = payload.enemies.map((e, i) => {
@@ -365,6 +441,11 @@ function runBattleTick() {
 
   renderBattle(actor);
   performAction(actor);
+  // Healer passive: after each ally action, tick regen on the actor itself.
+  if (actor.side === 'ally' && actor.regen && actor.hp > 0 && actor.hp < actor.maxHp) {
+    actor.hp = Math.min(actor.maxHp, actor.hp + actor.regen);
+    flashUnit(actor, `+${actor.regen}`, 'heal');
+  }
   setTimeout(() => {
     if (!battle) return;
     renderBattle(actor);
@@ -429,8 +510,9 @@ function generateTowerEnemies(floor) {
   // Pick random enemy kinds from the registry, scale level by floor.
   const kinds = Object.keys(ENEMY_KINDS).filter(k => !ENEMY_KINDS[k].isBoss);
   const level = Math.max(1, Math.ceil(floor * 1.2));
+  const count = floor >= 10 ? 5 : (floor >= 5 ? 4 : 3);
   const out = [];
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < count; i++) {
     const k = kinds[Math.floor(Math.random() * kinds.length)];
     const variant = rollEnemyVariant({ kind: k, level });
     variant.level = variant._level;
@@ -495,7 +577,13 @@ function flashUnit(unit, text, kind) {
 
 function renderTeam() {
   const c = document.getElementById('tab-team');
-  const slotsHTML = state.team.map((id, i) => {
+  const slotCount = teamSlotCount();
+  // Always render 4 slots; the 4th is locked with a hint if not yet unlocked.
+  const slotsHTML = [0,1,2,3].map(i => {
+    if (i >= slotCount) {
+      return `<div class="team-slot locked"><div class="team-slot-empty">🔒 Clear 2-5 to unlock</div></div>`;
+    }
+    const id = state.team[i];
     if (!id) {
       return `<div class="team-slot" data-slot="${i}"><div class="team-slot-empty">+ Slot ${i + 1}</div></div>`;
     }
@@ -511,15 +599,47 @@ function renderTeam() {
       </div>
     `;
   }).join('');
-  const ownedHeroes = HEROES.filter(h => state.owned[h.id]);
-  const pickerHTML = ownedHeroes.length
-    ? ownedHeroes.map(h => heroCardHTML(h, state.owned[h.id])).join('')
+  // Group owned heroes by class; within each class sort by level desc, then HP desc.
+  const classOrder = [
+    { key: 'knight', label: 'Knights', color: 'var(--class-knight)' },
+    { key: 'mage',   label: 'Mages',   color: 'var(--class-mage)'   },
+    { key: 'rogue',  label: 'Rogues',  color: 'var(--class-rogue)'  },
+    { key: 'healer', label: 'Healers', color: 'var(--class-healer)' },
+  ];
+  const owned = HEROES.filter(h => state.owned[h.id]);
+  const sortWithin = arr => arr.sort((a, b) => {
+    const la = state.owned[a.id].level, lb = state.owned[b.id].level;
+    if (la !== lb) return lb - la;
+    return heroStats(b, lb).hp - heroStats(a, la).hp;
+  });
+  const pickerHTML = owned.length
+    ? classOrder.map(c => {
+        const group = sortWithin(owned.filter(h => h.class === c.key));
+        if (!group.length) return '';
+        return `
+          <div class="class-section" style="border-left:3px solid ${c.color}">
+            <div class="class-section-header" style="color:${c.color}">${c.label} <span class="class-count">${group.length}</span></div>
+            <div class="hero-grid">${group.map(h => heroCardHTML(h, state.owned[h.id])).join('')}</div>
+          </div>
+        `;
+      }).join('')
     : '<p style="color:var(--text-muted);font-size:.8rem">No heroes yet. Visit the Summon tab.</p>';
 
+  const passivesBlurb = `
+    <div class="passives-box">
+      <div class="passives-title">Class Passives (active if at least one in party)</div>
+      <div class="passives-grid">
+        <div><span style="color:var(--class-knight)">Knight</span> — party +10% max HP</div>
+        <div><span style="color:var(--class-mage)">Mage</span> — +25% AoE damage</div>
+        <div><span style="color:var(--class-rogue)">Rogue</span> — first-strike (acts before enemies)</div>
+        <div><span style="color:var(--class-healer)">Healer</span> — party regen +3 HP per action</div>
+      </div>
+    </div>`;
   setHTML(c, `
     <h2>Your Team</h2>
-    <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Pick 3 heroes for battle. Tap a slot, then tap a hero from your collection below.</p>
-    <div class="team-slots">${slotsHTML}</div>
+    <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Pick ${slotCount} heroes for battle. Tap a slot, then tap a hero from your collection below.</p>
+    <div class="team-slots slots-${slotCount}">${slotsHTML}</div>
+    ${passivesBlurb}
     <h3 style="margin-top:20px">Collection</h3>
     <div class="hero-grid" id="teamPicker">${pickerHTML}</div>
   `);
@@ -658,18 +778,44 @@ function renderTower() {
 
 function renderCollection() {
   const c = document.getElementById('tab-collection');
-  const gridHTML = HEROES.map(h => heroCardHTML(h, state.owned[h.id])).join('');
+  // Group all heroes (owned + locked) by class; owned first within class, sorted by level/HP.
+  const classOrder = [
+    { key: 'knight', label: 'Knights', color: 'var(--class-knight)' },
+    { key: 'mage',   label: 'Mages',   color: 'var(--class-mage)'   },
+    { key: 'rogue',  label: 'Rogues',  color: 'var(--class-rogue)'  },
+    { key: 'healer', label: 'Healers', color: 'var(--class-healer)' },
+  ];
+  const sortHeroes = arr => arr.sort((a, b) => {
+    const oa = !!state.owned[a.id], ob = !!state.owned[b.id];
+    if (oa !== ob) return oa ? -1 : 1;
+    if (!oa) return 0;
+    const la = state.owned[a.id].level, lb = state.owned[b.id].level;
+    if (la !== lb) return lb - la;
+    return heroStats(b, lb).hp - heroStats(a, la).hp;
+  });
+  const sectionsHTML = classOrder.map(cl => {
+    const group = sortHeroes(HEROES.filter(h => h.class === cl.key));
+    if (!group.length) return '';
+    const ownedInGroup = group.filter(h => state.owned[h.id]).length;
+    return `
+      <div class="class-section" style="border-left:3px solid ${cl.color}">
+        <div class="class-section-header" style="color:${cl.color}">${cl.label} <span class="class-count">${ownedInGroup}/${group.length}</span></div>
+        <div class="hero-grid">${group.map(h => heroCardHTML(h, state.owned[h.id])).join('')}</div>
+      </div>
+    `;
+  }).join('');
   setHTML(c, `
     <h2>Collection (${ownedCount()}/${HEROES.length})</h2>
     <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Tap a hero you own to spend ${SHARDS_PER_LEVEL} shards on a level-up.</p>
-    <div class="hero-grid">${gridHTML}</div>
+    ${sectionsHTML}
   `);
   c.querySelectorAll('.hero-card').forEach(card => {
     card.addEventListener('click', () => {
       const id = card.dataset.heroId;
       const owned = state.owned[id];
       if (!owned) return;
-      if (owned.level >= MAX_LEVEL) { setLog('Max level reached.'); return; }
+      const cap = RARITY[heroById(id).rarity].maxLevel;
+      if (owned.level >= cap) { setLog('Max level reached.'); return; }
       if (owned.shards < SHARDS_PER_LEVEL) { setLog(`Need ${SHARDS_PER_LEVEL} shards (have ${owned.shards}).`); return; }
       owned.shards -= SHARDS_PER_LEVEL;
       owned.level++;
