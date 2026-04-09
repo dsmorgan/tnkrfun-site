@@ -119,8 +119,10 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   border-bottom:1px solid var(--border);
   padding:10px 16px;
   display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  height:44px;
 }
-body{padding-top:92px} /* compensate for fixed header+tabs */
+body{padding-top:79px} /* header (44) + tabs (~34) + 1px border */
+main{margin:0;padding:0;display:block}
 .header h1{color:var(--accent);white-space:nowrap}
 .header-stats{
   display:flex;gap:16px;font-size:.85rem;
@@ -138,6 +140,7 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
   background:var(--bg);
   border-bottom:1px solid var(--border);
   overflow-x:auto;
+  height:34px;
 }
 .tab-btn{
   padding:8px 14px;font-size:.8rem;
@@ -151,8 +154,9 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
 .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent)}
 .tab-btn:disabled{opacity:.4;cursor:not-allowed}
 
-.tab-content{display:none;padding:16px;min-height:calc(100vh - 140px)}
+.tab-content{display:none;padding:12px 16px 16px 16px;min-height:calc(100vh - 140px)}
 .tab-content.active{display:block}
+.tab-content > *:first-child{margin-top:0!important}
 
 /* Footer */
 .footer{
@@ -287,10 +291,49 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
   font-size:.85rem;font-weight:700;
   text-transform:uppercase;letter-spacing:.08em;
   margin-bottom:8px;
-  display:flex;align-items:baseline;gap:8px;
+  display:flex;align-items:center;gap:8px;
+  cursor:pointer;
+  user-select:none;
+  -webkit-user-select:none;
 }
+.class-section-header:hover{filter:brightness(1.2)}
 .class-section-header .class-count{
   font-size:.7rem;color:var(--text-muted);font-weight:400;
+  margin-left:auto;
+}
+.class-section-header .class-caret{
+  font-family:'Courier New',monospace;font-size:.75rem;
+  color:var(--text-muted);
+  transition:transform .2s;
+  display:inline-block;width:12px;
+}
+.class-section.collapsed .class-caret{transform:rotate(-90deg)}
+.class-section.collapsed .hero-grid{display:none}
+
+/* Sticky Your Team header (stays visible while scrolling collection) */
+/* Team tab uses a flex split: fixed top panel + scrollable collection below */
+#tab-team.tab-content{
+  display:none;
+  padding:0;
+  /* Take all viewport height below the fixed header bar */
+  height:calc(100vh - 79px - 40px); /* 79 fixed bar, 40 footer */
+  flex-direction:column;
+  overflow:hidden;
+}
+#tab-team.tab-content.active{display:flex}
+.team-sticky{
+  flex-shrink:0;
+  background:var(--bg);
+  padding:12px 16px 10px 16px;
+  border-bottom:1px solid var(--border);
+  box-shadow:0 6px 12px -8px rgba(0,0,0,.6);
+}
+.team-sticky > h2{margin-top:0}
+.team-sticky .passives-box{margin-top:14px;margin-bottom:0}
+.team-collection-scroll{
+  flex:1;
+  overflow-y:auto;
+  padding:10px 16px 16px 16px;
 }
 
 /* Team tab */
@@ -695,6 +738,165 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
 .battle-result.victory{color:var(--accent)}
 .battle-result.defeat{color:var(--red)}
 
+/* ── Level-up attention + celebration ────────── */
+
+/* Dim non-ready owned cards slightly so ready ones stand out */
+.hero-card.dim-unready{filter:brightness(.78) saturate(.85)}
+
+/* LV UP chip — inside top-right of a ready card (kept inside card bounds
+   so it survives overflow:hidden from the shimmer sweep). */
+.lvup-chip{
+  position:absolute;top:6px;right:6px;
+  font-family:'Courier New',monospace;font-size:.6rem;font-weight:700;
+  letter-spacing:.08em;
+  background:linear-gradient(180deg,#fff2a8 0%,#ffcc33 50%,#ff9500 100%);
+  color:#0d0d1a;
+  padding:3px 9px;border-radius:10px;
+  box-shadow:0 0 10px rgba(255,204,51,.8),0 0 22px rgba(255,204,51,.5);
+  animation:lvupChipPulse 1.4s ease-in-out infinite;
+  z-index:3;pointer-events:none;
+}
+@keyframes lvupChipPulse{
+  0%,100%{transform:scale(1);box-shadow:0 0 8px rgba(255,204,51,.65),0 0 18px rgba(255,204,51,.35)}
+  50%    {transform:scale(1.12);box-shadow:0 0 14px rgba(255,220,100,1),0 0 28px rgba(255,220,100,.7)}
+}
+
+/* Glowing shard counter when \u22655 */
+.hero-shards.ready{
+  color:#ffcc33;font-weight:700;
+  text-shadow:0 0 6px rgba(255,204,51,.7);
+  animation:shardsReadyPulse 1.8s ease-in-out infinite;
+}
+@keyframes shardsReadyPulse{
+  0%,100%{text-shadow:0 0 5px rgba(255,204,51,.55)}
+  50%    {text-shadow:0 0 12px rgba(255,220,100,.95)}
+}
+
+/* Shimmer sweep (diagonal light streak) across ready cards.
+   Keep overflow:hidden here — the LV UP chip lives inside the card bounds now. */
+.hero-card.ready-shimmer{overflow:hidden}
+.hero-card.ready-shimmer::after{
+  content:'';
+  position:absolute;top:0;left:-120%;
+  width:60%;height:100%;
+  background:linear-gradient(100deg,transparent 25%,rgba(255,255,255,.18) 45%,rgba(255,255,255,.35) 50%,rgba(255,255,255,.18) 55%,transparent 75%);
+  transform:skewX(-18deg);
+  animation:shimmerSweep 3.2s ease-in-out infinite;
+  pointer-events:none;z-index:2;
+}
+@keyframes shimmerSweep{
+  0%,70%,100%{left:-120%}
+  85%        {left:120%}
+}
+
+/* Tab badge — red count pill shown inline after the tab label.
+   Kept inside the button bounds because .tabs uses overflow-x:auto. */
+.tab-ready-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 5px;
+  margin-left:6px;
+  background:var(--red);color:#fff;
+  font-family:'Courier New',monospace;font-size:.6rem;font-weight:700;
+  border-radius:10px;
+  vertical-align:middle;
+  box-shadow:0 0 6px rgba(255,68,68,.7);
+  animation:tabBadgePulse 1.8s ease-in-out infinite;
+}
+@keyframes tabBadgePulse{
+  0%,100%{transform:scale(1);   box-shadow:0 0 5px rgba(255,68,68,.55)}
+  50%    {transform:scale(1.12);box-shadow:0 0 12px rgba(255,100,100,.95)}
+}
+
+/* ── Level-up celebration ───────────────────── */
+
+/* Card zoom + flash on level up */
+.hero-card.leveling{
+  animation:cardLevelZoom 1.4s ease-out;
+  z-index:5;
+}
+@keyframes cardLevelZoom{
+  0%  {transform:scale(1);   filter:brightness(1)}
+  15% {transform:scale(1.15);filter:brightness(2.2) saturate(1.6)}
+  35% {transform:scale(1.08);filter:brightness(1.4)}
+  100%{transform:scale(1);   filter:brightness(1)}
+}
+
+/* Expanding burst ring on level up (color varies by rarity) */
+.lvup-ring{
+  position:absolute;top:50%;left:50%;
+  width:40px;height:40px;border-radius:50%;
+  border:3px solid #ffcc33;
+  transform:translate(-50%,-50%) scale(.4);
+  animation:lvupRing 1s ease-out forwards;
+  pointer-events:none;z-index:4;
+}
+.lvup-ring.common{border-color:#ffffff;box-shadow:0 0 12px rgba(255,255,255,.6)}
+.lvup-ring.rare  {border-color:#ffcc33;box-shadow:0 0 16px rgba(255,204,51,.8)}
+.lvup-ring.epic  {border-color:#d8a0ff;box-shadow:0 0 22px rgba(216,160,255,.95)}
+@keyframes lvupRing{
+  0%  {transform:translate(-50%,-50%) scale(.3);opacity:1;border-width:4px}
+  100%{transform:translate(-50%,-50%) scale(3.5);opacity:0;border-width:1px}
+}
+
+/* +1 LEVEL floating text */
+.lvup-text{
+  position:absolute;top:30%;left:50%;
+  transform:translate(-50%,-50%);
+  font-family:'Courier New',monospace;
+  font-size:1.2rem;font-weight:700;
+  color:#ffcc33;
+  text-shadow:0 0 8px rgba(255,204,51,.9),0 0 4px #000,0 2px 2px #000;
+  pointer-events:none;
+  animation:lvupTextFloat 1.4s ease-out forwards;
+  z-index:6;
+  white-space:nowrap;
+}
+@keyframes lvupTextFloat{
+  0%  {transform:translate(-50%,-10%) scale(.5);opacity:0}
+  25% {transform:translate(-50%,-35%) scale(1.3);opacity:1}
+  70% {transform:translate(-50%,-55%) scale(1.1);opacity:1}
+  100%{transform:translate(-50%,-75%) scale(1);  opacity:0}
+}
+
+/* Stat delta popups (HP +12 etc.) — staggered */
+.lvup-delta{
+  position:absolute;left:50%;top:55%;
+  font-family:'Courier New',monospace;font-size:.75rem;font-weight:700;
+  color:var(--hp);
+  text-shadow:0 0 6px rgba(80,216,144,.8),0 1px 2px #000;
+  transform:translate(-50%,0);
+  pointer-events:none;
+  animation:lvupDelta 1.2s ease-out forwards;
+  z-index:6;white-space:nowrap;
+}
+@keyframes lvupDelta{
+  0%  {transform:translate(-50%,10px) scale(.7);opacity:0}
+  25% {transform:translate(-50%,0)    scale(1.1);opacity:1}
+  75% {transform:translate(-50%,-18px)scale(1);  opacity:1}
+  100%{transform:translate(-50%,-28px)scale(.9); opacity:0}
+}
+
+/* Level number flash when it bumps */
+.hero-level.flash{animation:lvupLevelFlash .9s ease-out}
+@keyframes lvupLevelFlash{
+  0%  {transform:scale(1);  color:var(--gold)}
+  30% {transform:scale(1.5);color:#fff;text-shadow:0 0 14px rgba(255,220,100,1)}
+  100%{transform:scale(1);  color:var(--gold)}
+}
+
+/* Max-level confetti particles */
+.lvup-confetti{
+  position:absolute;top:50%;left:50%;
+  width:6px;height:6px;
+  border-radius:1px;
+  pointer-events:none;z-index:5;
+  animation:confettiFly 1.2s ease-out forwards;
+}
+@keyframes confettiFly{
+  0%  {transform:translate(-50%,-50%) rotate(0)   scale(1);  opacity:1}
+  100%{opacity:0}
+}
+
 /* ── Pull reveal overlay ────────────────────── */
 .pull-overlay{
   position:fixed;inset:0;
@@ -850,15 +1052,30 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
 
 /* Mobile */
 @media(max-width:700px){
-  .hero-grid{grid-template-columns:repeat(2,1fr);gap:8px}
-  .team-slots.slots-3,.team-slots.slots-4{grid-template-columns:repeat(2,1fr)}
-  .team-slots{gap:8px}
+  .hero-grid{grid-template-columns:1fr;gap:8px} /* single column for legibility */
+  .team-slots.slots-3,.team-slots.slots-4{grid-template-columns:repeat(4,1fr);gap:4px}
+  .team-slots{gap:4px}
   .passives-grid{grid-template-columns:1fr}
-  .team-slot{min-height:130px;padding:10px}
+  /* Compact team slots so the sticky block doesn't eat the viewport */
+  .team-slot{min-height:88px;padding:6px;gap:2px}
+  .team-slot .hero-portrait{width:40px;height:40px}
+  .team-slot .hero-portrait .ti-icon{width:32px;height:32px}
+  .team-slot .hero-name{font-size:.7rem}
+  .team-slot .hero-class{font-size:.55rem}
+  .team-slot .hero-level{font-size:.6rem}
+  .team-slot [data-clear-slot]{font-size:.55rem!important;padding:1px 4px!important;margin-top:2px!important}
+  .team-slot-empty{font-size:.65rem}
+  .team-sticky .team-sticky-hint{display:none}
+  .team-sticky h2{font-size:.9rem;margin-bottom:4px}
+  .team-sticky{padding:8px 12px}
+  .team-collection-scroll{padding:8px 12px 12px 12px}
+  .team-sticky .passives-box{margin-top:8px;font-size:.65rem}
+  /* Account for smaller mobile fixed bar height */
+  #tab-team.tab-content{height:calc(100vh - 79px - 40px)}
   .header{padding:8px 12px;gap:8px}
   .header-stats{font-size:.75rem;gap:10px}
   .tab-btn{padding:6px 10px;font-size:.75rem}
-  .tab-content{padding:12px}
+  .tab-content{padding:0 12px 12px 12px}
   .battle-side{gap:6px}
   .battle-unit{padding:6px}
 }

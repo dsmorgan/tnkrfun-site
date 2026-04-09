@@ -76,6 +76,18 @@ function loadState() {
 
 function heroById(id) { return HEROES.find(h => h.id === id) || null; }
 
+function isMobile() { return window.matchMedia('(max-width:700px)').matches; }
+
+// Delegate clicks on class-section headers to toggle collapse state.
+function wireClassSectionToggles(container) {
+  container.querySelectorAll('[data-collapse-toggle]').forEach(header => {
+    header.addEventListener('click', e => {
+      // Don't steal clicks from children that may be interactive
+      header.closest('.class-section').classList.toggle('collapsed');
+    });
+  });
+}
+
 // Team size: starts at 3, unlocks to 4 after clearing stage 2-5.
 function teamSlotCount() {
   return state.cleared && state.cleared['2-5'] ? 4 : 3;
@@ -141,6 +153,7 @@ function updateHeader() {
   document.getElementById('heroesDisplay').textContent = `${ownedCount()}/${HEROES.length}`;
   const towerBtn = document.getElementById('towerTabBtn');
   if (towerBtn) towerBtn.disabled = !state.tower.unlocked;
+  if (typeof updateCollectionTabBadge === 'function') updateCollectionTabBadge();
 }
 
 // Build a CSS-mask icon div for a hero or enemy.
@@ -168,10 +181,15 @@ function heroCardHTML(hero, owned, opts) {
   const cap = RARITY[hero.rarity].maxLevel;
   const level = owned ? owned.level : RARITY[hero.rarity].startLevel;
   const atMax = owned && owned.level >= cap;
+  const ready = owned && !atMax && owned.shards >= SHARDS_PER_LEVEL;
+  const readyClasses = ready ? ' ready-shimmer' : (owned && !atMax ? ' dim-unready' : '');
   const lvl = owned
     ? `<div class="hero-level">Lv ${owned.level}${atMax ? ' <span class="hero-max">max</span>' : ''}</div>`
     : '';
-  const shards = owned ? `<div class="hero-shards">${owned.shards} shards</div>` : '';
+  const shardsClass = ready ? 'hero-shards ready' : 'hero-shards';
+  const shardsArrow = ready ? ' \u2191' : '';
+  const shards = owned ? `<div class="${shardsClass}">${owned.shards} shards${shardsArrow}</div>` : '';
+  const lvupChip = ready ? '<div class="lvup-chip">LV UP \u2191</div>' : '';
   // Stats block: shows HP, primary action (ATK/AoE/HEAL with multiplier), SPD
   const s = heroStats(hero, level);
   const act = effectiveActionStat(hero.class, s.atk);
@@ -183,7 +201,8 @@ function heroCardHTML(hero, owned, opts) {
       <div class="stat-row"><span class="stat-k">SPD</span><span class="stat-v">${s.spd}</span><span></span></div>
     </div>`;
   return `
-    <div class="hero-card rarity-${hero.rarity}${lockedClass}${selectedClass}" data-hero-id="${hero.id}">
+    <div class="hero-card rarity-${hero.rarity}${lockedClass}${selectedClass}${readyClasses}" data-hero-id="${hero.id}">
+      ${lvupChip}
       ${heroPortrait(hero)}
       <div class="hero-name">${hero.name}</div>
       <div class="hero-class">${hero.class}</div>
@@ -810,13 +829,15 @@ function renderTeam() {
     if (la !== lb) return lb - la;
     return heroStats(b, lb).hp - heroStats(a, la).hp;
   });
+  // On mobile, default-collapse all class sections to reduce scroll burden.
+  const collapseDefault = isMobile() ? ' collapsed' : '';
   const pickerHTML = owned.length
     ? classOrder.map(c => {
         const group = sortWithin(owned.filter(h => h.class === c.key));
         if (!group.length) return '';
         return `
-          <div class="class-section" style="border-left:3px solid ${c.color}">
-            <div class="class-section-header" style="color:${c.color}">${c.label} <span class="class-count">${group.length}</span></div>
+          <div class="class-section${collapseDefault}" data-class="${c.key}" style="border-left:3px solid ${c.color}">
+            <div class="class-section-header" data-collapse-toggle style="color:${c.color}"><span class="class-caret">\u25BE</span> ${c.label} <span class="class-count">${group.length}</span></div>
             <div class="hero-grid">${group.map(h => heroCardHTML(h, state.owned[h.id])).join('')}</div>
           </div>
         `;
@@ -834,12 +855,16 @@ function renderTeam() {
       </div>
     </div>`;
   setHTML(c, `
-    <h2>Your Team</h2>
-    <p style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Pick ${slotCount} heroes for battle. Tap a slot, then tap a hero from your collection below.</p>
-    <div class="team-slots slots-${slotCount}">${slotsHTML}</div>
-    ${passivesBlurb}
-    <h3 style="margin-top:20px">Collection</h3>
-    <div class="hero-grid" id="teamPicker">${pickerHTML}</div>
+    <div class="team-sticky">
+      <h2>Your Team</h2>
+      <p class="team-sticky-hint" style="font-size:.8rem;color:var(--text-muted);margin-bottom:12px">Pick ${slotCount} heroes for battle. Tap a slot, then tap a hero from your collection below.</p>
+      <div class="team-slots slots-${slotCount}">${slotsHTML}</div>
+      ${passivesBlurb}
+    </div>
+    <div class="team-collection-scroll">
+      <h3 style="margin-top:0">Collection</h3>
+      <div class="hero-grid" id="teamPicker">${pickerHTML}</div>
+    </div>
   `);
 
   let pickingSlot = null;
@@ -876,6 +901,7 @@ function renderTeam() {
       saveState(); renderTeam();
     });
   });
+  wireClassSectionToggles(c);
 }
 
 function renderSummon() {
@@ -1140,13 +1166,14 @@ function renderCollection() {
     if (la !== lb) return lb - la;
     return heroStats(b, lb).hp - heroStats(a, la).hp;
   });
+  const collapseDefault = isMobile() ? ' collapsed' : '';
   const sectionsHTML = classOrder.map(cl => {
     const group = sortHeroes(HEROES.filter(h => h.class === cl.key));
     if (!group.length) return '';
     const ownedInGroup = group.filter(h => state.owned[h.id]).length;
     return `
-      <div class="class-section" style="border-left:3px solid ${cl.color}">
-        <div class="class-section-header" style="color:${cl.color}">${cl.label} <span class="class-count">${ownedInGroup}/${group.length}</span></div>
+      <div class="class-section${collapseDefault}" data-class="${cl.key}" style="border-left:3px solid ${cl.color}">
+        <div class="class-section-header" data-collapse-toggle style="color:${cl.color}"><span class="class-caret">\u25BE</span> ${cl.label} <span class="class-count">${ownedInGroup}/${group.length}</span></div>
         <div class="hero-grid">${group.map(h => heroCardHTML(h, state.owned[h.id])).join('')}</div>
       </div>
     `;
@@ -1161,18 +1188,138 @@ function renderCollection() {
       const id = card.dataset.heroId;
       const owned = state.owned[id];
       if (!owned) return;
-      const cap = RARITY[heroById(id).rarity].maxLevel;
+      const hero = heroById(id);
+      const cap = RARITY[hero.rarity].maxLevel;
       if (owned.level >= cap) { setLog('Max level reached.'); return; }
       if (owned.shards < SHARDS_PER_LEVEL) { setLog(`Need ${SHARDS_PER_LEVEL} shards (have ${owned.shards}).`); return; }
+      // Capture before-stats for delta display
+      const before = heroStats(hero, owned.level);
       owned.shards -= SHARDS_PER_LEVEL;
       owned.level++;
-      const h = heroById(id);
-      setLog(`${h.name} reached Lv ${owned.level}!`);
+      const after = heroStats(hero, owned.level);
+      const hitMax = owned.level >= cap;
+      setLog(`${hero.name} reached Lv ${owned.level}!`);
       saveState();
-      renderCollection();
+      // Play celebration on the card in place, then re-render after it settles
+      playLevelUpCelebration(card, hero, before, after, hitMax);
       updateHeader();
+      updateCollectionTabBadge();
+      setTimeout(() => renderCollection(), 1500);
     });
   });
+  wireClassSectionToggles(c);
+  // Auto-scroll to first ready card — first expand its section if collapsed.
+  const firstReady = c.querySelector('.hero-card.ready-shimmer');
+  if (firstReady) {
+    const section = firstReady.closest('.class-section');
+    if (section) section.classList.remove('collapsed');
+    setTimeout(() => firstReady.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  }
+}
+
+// ───────────────────────────────────────────────
+// Level-up celebration
+// ───────────────────────────────────────────────
+
+function playLevelUpCelebration(card, hero, before, after, hitMax) {
+  card.classList.add('leveling');
+
+  // Burst ring (color by rarity)
+  const ring = document.createElement('div');
+  ring.className = 'lvup-ring ' + hero.rarity;
+  card.appendChild(ring);
+  setTimeout(() => ring.remove(), 1100);
+
+  // +1 LEVEL text
+  const text = document.createElement('div');
+  text.className = 'lvup-text';
+  text.textContent = '+1 LEVEL';
+  card.appendChild(text);
+  setTimeout(() => text.remove(), 1450);
+
+  // Stat deltas — staggered
+  const deltas = [];
+  const hpDelta  = after.hp  - before.hp;
+  const atkDelta = after.atk - before.atk;
+  if (hpDelta > 0)  deltas.push({ label: 'HP',  value: hpDelta });
+  if (atkDelta > 0) deltas.push({ label: 'ATK', value: atkDelta });
+  deltas.forEach((d, i) => {
+    setTimeout(() => {
+      const el = document.createElement('div');
+      el.className = 'lvup-delta';
+      el.textContent = `${d.label} +${d.value}`;
+      el.style.left = (45 + i * 15) + '%';
+      card.appendChild(el);
+      setTimeout(() => el.remove(), 1250);
+    }, 250 + i * 180);
+  });
+
+  // Level number flash
+  const lvlEl = card.querySelector('.hero-level');
+  if (lvlEl) {
+    lvlEl.classList.remove('flash');
+    void lvlEl.offsetWidth;
+    lvlEl.classList.add('flash');
+  }
+
+  // Max-level confetti
+  if (hitMax) spawnMaxConfetti(card);
+
+  // Clean up leveling class
+  setTimeout(() => card.classList.remove('leveling'), 1450);
+}
+
+function spawnMaxConfetti(card) {
+  const colors = ['#ffcc33', '#d8a0ff', '#39ff14', '#ff9500', '#7ec0ff', '#ff9ec4'];
+  for (let i = 0; i < 14; i++) {
+    const p = document.createElement('div');
+    p.className = 'lvup-confetti';
+    p.style.background = colors[i % colors.length];
+    const angle = (Math.PI * 2) * (i / 14) + Math.random() * 0.3;
+    const distance = 70 + Math.random() * 40;
+    const dx = Math.cos(angle) * distance;
+    const dy = Math.sin(angle) * distance - 20;
+    const rot = (Math.random() * 720 - 360) + 'deg';
+    p.style.setProperty('--dx', dx + 'px');
+    p.style.setProperty('--dy', dy + 'px');
+    p.style.animation = `confettiFly${i % 3} 1.3s ease-out forwards`;
+    p.style.animationDelay = (i * 20) + 'ms';
+    // Inline keyframes via transform end state on a secondary element-level transform
+    p.style.setProperty('--rot', rot);
+    card.appendChild(p);
+    // Drive motion with a setTimeout-based transform
+    requestAnimationFrame(() => {
+      p.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) rotate(${rot}) scale(.6)`;
+      p.style.transition = 'transform 1.2s cubic-bezier(.3,.9,.5,1), opacity 1.2s ease-out';
+      p.style.opacity = '0';
+    });
+    setTimeout(() => p.remove(), 1400);
+  }
+}
+
+function updateCollectionTabBadge() {
+  const btn = document.querySelector('.tab-btn[data-tab="collection"]');
+  if (!btn) return;
+  const existing = btn.querySelector('.tab-ready-badge');
+  // Count heroes ready to level up
+  let readyCount = 0;
+  HEROES.forEach(h => {
+    const o = state.owned[h.id];
+    if (!o) return;
+    const cap = RARITY[h.rarity].maxLevel;
+    if (o.level < cap && o.shards >= SHARDS_PER_LEVEL) readyCount++;
+  });
+  if (readyCount > 0) {
+    if (existing) existing.textContent = readyCount;
+    else {
+      const badge = document.createElement('span');
+      badge.className = 'tab-ready-badge';
+      badge.textContent = readyCount;
+      btn.appendChild(badge);
+    }
+  } else if (existing) {
+    existing.remove();
+  }
 }
 
 // ───────────────────────────────────────────────
