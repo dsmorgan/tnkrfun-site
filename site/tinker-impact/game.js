@@ -184,7 +184,7 @@ function heroCardHTML(hero, owned, opts) {
   const ready = owned && !atMax && owned.shards >= SHARDS_PER_LEVEL;
   const readyClasses = ready ? ' ready-shimmer' : (owned && !atMax ? ' dim-unready' : '');
   const lvl = owned
-    ? `<div class="hero-level">Lv ${owned.level}${atMax ? ' <span class="hero-max">max</span>' : ''}</div>`
+    ? `<div class="hero-level">Lv <span class="lv-num">${owned.level}</span>${atMax ? ' <span class="hero-max">max</span>' : ''}</div>`
     : '';
   const shardsClass = ready ? 'hero-shards ready' : 'hero-shards';
   const shardsArrow = ready ? ' \u2191' : '';
@@ -246,10 +246,12 @@ function singlePull(forceRarePlus) {
   if (!state.owned[hero.id]) {
     const startLevel = RARITY[hero.rarity].startLevel;
     state.owned[hero.id] = { level: startLevel, shards: 0 };
-    return { hero, isNew: true };
+    return { hero, isNew: true, shardsGained: 0 };
   } else {
-    state.owned[hero.id].shards++;
-    return { hero, isNew: false };
+    // Dupe — apply rarity-tiered bonus shard roll
+    const gained = shardsPerDupe(hero.rarity);
+    state.owned[hero.id].shards += gained;
+    return { hero, isNew: false, shardsGained: gained };
   }
 }
 
@@ -350,15 +352,25 @@ function startBattle(kind, payload) {
   applyClassPassives(allies);
   let enemies;
   if (kind === 'stage') {
-    enemies = payload.enemies.map((e, i) => {
+    // Support both shapes: legacy stage.enemies and new stage.phases[0].enemies
+    const phase1Enemies = (payload.phases && payload.phases[0] && payload.phases[0].enemies) || payload.enemies || [];
+    enemies = phase1Enemies.map((e, i) => {
       const variant = rollEnemyVariant(e);
       return makeUnit(variant, variant._level, 'enemy', i);
     });
   } else if (kind === 'tower') {
-    enemies = generateTowerEnemies(payload.floor).map((e, i) => makeUnit(e, e.level, 'enemy', i));
+    // Tower payload has phases[] with pre-rolled enemy variants.
+    const phase1 = payload.phases && payload.phases[0];
+    const phase1Variants = (phase1 && phase1._preRolled) || [];
+    enemies = phase1Variants.map((e, i) => makeUnit(e, e.level || e._level || 1, 'enemy', i));
   }
 
-  battle = { kind, payload, allies, enemies, time: 0, over: false, victory: false };
+  battle = {
+    kind, payload, allies, enemies,
+    time: 0, over: false, victory: false,
+    currentPhase: 1, // 1-indexed
+    clearedPhaseBonuses: 0,
+  };
   [...allies, ...enemies].forEach(u => { u.nextAct = 100 / u.spd; });
 
   document.getElementById('battleOverlay').classList.add('active');
@@ -445,12 +457,195 @@ function checkBattleEnd() {
   const alliesAlive = liveUnits('ally').length > 0;
   const enemiesAlive = liveUnits('enemy').length > 0;
   if (!alliesAlive || !enemiesAlive) {
+    // If allies won the current phase and another phase exists, trigger
+    // the phase transition cinematic instead of ending the battle.
+    if (alliesAlive && !enemiesAlive) {
+      // Works for stage and tower both — both use payload.phases[] now.
+      const phases = battle.payload.phases;
+      if (phases && battle.currentPhase < phases.length) {
+        const currentPhaseCfg = phases[battle.currentPhase]; // next phase we're about to enter
+        if (currentPhaseCfg && currentPhaseCfg.rewardBonus) {
+          battle.clearedPhaseBonuses += currentPhaseCfg.rewardBonus;
+        }
+        battle.over = true;
+        triggerPhaseTransition(currentPhaseCfg, battle.currentPhase + 1);
+        return true;
+      }
+    }
     battle.over = true;
     battle.victory = alliesAlive;
     onBattleEnd();
     return true;
   }
   return false;
+}
+
+// Intensity presets: timing and color for the phase transition cinematic.
+// Higher intensity = longer shake, more time to read voice lines, bigger banner.
+const PHASE_INTENSITY = {
+  low: {
+    shakeMs: 2400,
+    voiceHoldMs: 2200,
+    voiceSpacingMs: 1600,
+    voiceFont: '1.3rem',
+    bannerDuration: 1400,
+    vignetteMs: 3200,
+  },
+  medium: {
+    shakeMs: 3500,
+    voiceHoldMs: 2600,
+    voiceSpacingMs: 1900,
+    voiceFont: '1.5rem',
+    bannerDuration: 1600,
+    vignetteMs: 4500,
+  },
+  high: {
+    shakeMs: 5000,
+    voiceHoldMs: 2800,
+    voiceSpacingMs: 2000,
+    voiceFont: '1.6rem',
+    bannerDuration: 1650,
+    vignetteMs: 6000,
+  },
+  max: {
+    shakeMs: 7000,
+    voiceHoldMs: 3200,
+    voiceSpacingMs: 2400,
+    voiceFont: '1.9rem',
+    bannerDuration: 2000,
+    vignetteMs: 8500,
+  },
+};
+
+// ── Phase 2 transition orchestration ──
+// Generalized phase transition: runs the cinematic for the upcoming phase
+// config and spawns its enemies when the shake ends.
+function triggerPhaseTransition(cfg, newPhaseNumber) {
+  const arena = document.getElementById('battleArena');
+  if (!arena) return;
+  const voiceLines = cfg.voiceLines || [];
+  const bannerText = cfg.bannerText || `PHASE ${newPhaseNumber}`;
+  const preset = PHASE_INTENSITY[cfg.intensity] || PHASE_INTENSITY.high;
+  const vignetteColor = cfg.vignette || 'red';
+  const vortexColor = cfg.vortexColor || 'purple';
+
+  // Freeze a dramatic beat before the shake starts.
+  setTimeout(() => {
+    // 1. Heavy shake + vignette (color per config) + screen flash
+    arena.classList.add('phase-shake-heavy');
+    arena.style.animationDuration = (preset.shakeMs / 1000) + 's';
+
+    const vignette = document.createElement('div');
+    vignette.className = 'phase-vignette vignette-' + vignetteColor;
+    arena.appendChild(vignette);
+    vignette.style.animationDuration = (preset.vignetteMs / 1000) + 's';
+    const flash = document.createElement('div');
+    flash.className = 'phase-screen-flash flash-' + vignetteColor;
+    arena.appendChild(flash);
+    setTimeout(() => vignette.remove(), preset.vignetteMs);
+    setTimeout(() => flash.remove(), 1700);
+
+    // 2. Voice lines drop in sequentially
+    voiceLines.forEach((line, i) => {
+      setTimeout(() => {
+        const v = document.createElement('div');
+        v.className = 'phase-voiceline';
+        v.style.fontSize = preset.voiceFont;
+        v.style.animationDuration = (preset.voiceHoldMs / 1000) + 's';
+        v.textContent = line;
+        arena.appendChild(v);
+        setTimeout(() => v.remove(), preset.voiceHoldMs);
+      }, 400 + i * preset.voiceSpacingMs);
+    });
+
+    // 3. Vortex spawns after voice lines
+    const voiceTotal = 400 + voiceLines.length * preset.voiceSpacingMs;
+    const vortexDelay = voiceTotal + 300;
+    setTimeout(() => {
+      const enemySide = document.getElementById('enemySide');
+      if (enemySide) {
+        const rect = enemySide.getBoundingClientRect();
+        const arenaRect = arena.getBoundingClientRect();
+        const vortex = document.createElement('div');
+        vortex.className = 'phase-vortex vortex-' + vortexColor;
+        vortex.style.left = ((rect.left - arenaRect.left) + rect.width / 2) + 'px';
+        vortex.style.top  = ((rect.top  - arenaRect.top)  + rect.height / 2) + 'px';
+        arena.appendChild(vortex);
+        setTimeout(() => vortex.remove(), 1900);
+      }
+    }, vortexDelay);
+
+    // 4. Shake ends, spawn new enemies + banner
+    const spawnDelay = vortexDelay + 1100;
+    setTimeout(() => {
+      arena.classList.remove('phase-shake-heavy');
+      arena.style.animationDuration = '';
+      spawnPhaseEnemies(cfg, newPhaseNumber);
+      const banner = document.createElement('div');
+      banner.className = 'phase-banner';
+      banner.textContent = bannerText;
+      banner.style.animationDuration = (preset.bannerDuration / 1000) + 's';
+      arena.appendChild(banner);
+      setTimeout(() => banner.remove(), preset.bannerDuration + 200);
+    }, spawnDelay);
+
+    // 5. Resume combat after the banner finishes
+    setTimeout(() => {
+      battle.over = false;
+      scheduleNextTick();
+    }, spawnDelay + preset.bannerDuration + 200);
+  }, 400);
+}
+
+function spawnPhaseEnemies(cfg, newPhaseNumber) {
+  if (!cfg) return;
+  let newEnemies;
+  if (cfg._preRolled) {
+    // Tower path — variants are already rolled, just make units
+    newEnemies = cfg._preRolled.map((e, i) => {
+      const unit = makeUnit(e, e.level || e._level || 1, 'enemy', i);
+      unit.nextAct = 100 / unit.spd;
+      return unit;
+    });
+  } else if (cfg.enemies) {
+    // Stage path — enemies are kind+level specs, look up ENEMY_KINDS
+    newEnemies = cfg.enemies.map((e, i) => {
+      const kind = ENEMY_KINDS[e.kind];
+      const typeLetter = (kind && kind.types && kind.types[0]) || 'G';
+      const variant = {
+        name: kind ? kind.name : e.kind,
+        class: kind ? kind.class : 'mage',
+        rarity: 'common',
+        iconSlug: kind ? kind.icon : null,
+        iconTint: `tint-${typeLetter}`,
+        _level: e.level,
+      };
+      const unit = makeUnit(variant, e.level, 'enemy', i);
+      if (kind && kind.hpMult) {
+        unit.maxHp = Math.round(unit.maxHp * kind.hpMult);
+        unit.hp    = unit.maxHp;
+      }
+      unit.nextAct = 100 / unit.spd;
+      return unit;
+    });
+  } else {
+    return;
+  }
+  battle.enemies = newEnemies;
+  battle.currentPhase = newPhaseNumber;
+  // Reset allies' turn timers so they compete on equal footing. Rogues keep first-strike.
+  battle.allies.forEach(u => {
+    if (u.hp <= 0) return;
+    u.nextAct = (u.class === 'rogue') ? 0 : 100 / u.spd;
+  });
+  battle.time = 0;
+  renderBattle();
+  requestAnimationFrame(() => {
+    document.querySelectorAll('#enemySide .battle-unit').forEach(el => {
+      el.classList.add('phase-spawn');
+      setTimeout(() => el.classList.remove('phase-spawn'), 720);
+    });
+  });
 }
 
 // ── Battle pacing constants ──
@@ -619,6 +814,11 @@ function onBattleEnd() {
       const stage = battle.payload;
       const [c, s] = stage.id.split('-').map(Number);
       reward = 50 * c * s;
+      // Multi-phase stages: bonus is only paid if the final phase was cleared.
+      // clearedPhaseBonuses accumulates as the player advances through phases.
+      if (stage.phases && battle.clearedPhaseBonuses) {
+        reward += battle.clearedPhaseBonuses;
+      }
       if (!state.cleared[stage.id]) {
         state.cleared[stage.id] = true;
         const nextS = s + 1;
@@ -632,6 +832,8 @@ function onBattleEnd() {
     } else if (battle.kind === 'tower') {
       const floor = battle.payload.floor;
       reward = 50 + 20 * floor;
+      // Phase bonus (paid only on final phase clear)
+      if (battle.clearedPhaseBonuses) reward += battle.clearedPhaseBonuses;
       if (floor >= state.tower.floor) state.tower.floor = floor + 1;
       if (floor > state.tower.best) state.tower.best = floor;
     }
@@ -676,11 +878,21 @@ function showBattleEndscreen(victory, reward) {
 // Tower
 // ───────────────────────────────────────────────
 
-function generateTowerEnemies(floor) {
-  // Pick random enemy kinds from the registry, scale level by floor.
+// Tower count formula:
+//   Floor 1-4  → 3, Floor 5-9 → 4, Floor 10-14 → 5, ..., cap at 12.
+//   Every 5th floor (5, 10, 15, ...) is a 2-phase boss floor where phase 2
+//   has (count + 1) enemies.
+function towerEnemyCount(floor) {
+  const base = 3 + Math.floor((floor - 1) / 5);
+  return Math.min(12, base);
+}
+
+function isTowerBossFloor(floor) { return floor % 5 === 0; }
+
+// Build an array of pre-rolled enemy variant objects for a tower phase.
+function rollTowerEnemies(floor, count) {
   const kinds = Object.keys(ENEMY_KINDS).filter(k => !ENEMY_KINDS[k].isBoss);
   const level = Math.max(1, Math.ceil(floor * 1.2));
-  const count = floor >= 10 ? 5 : (floor >= 5 ? 4 : 3);
   const out = [];
   for (let i = 0; i < count; i++) {
     const k = kinds[Math.floor(Math.random() * kinds.length)];
@@ -691,9 +903,56 @@ function generateTowerEnemies(floor) {
   return out;
 }
 
+// Returns a tower payload.phases[] array. Boss floors have 2 phases.
+function buildTowerPhases(floor) {
+  const count = towerEnemyCount(floor);
+  const phases = [
+    { _preRolled: rollTowerEnemies(floor, count) },
+  ];
+  if (isTowerBossFloor(floor)) {
+    const phase2Count = Math.min(12, count + 1);
+    phases.push({
+      _preRolled: rollTowerEnemies(floor, phase2Count),
+      bannerText: `FLOOR ${floor} — PHASE 2`,
+      voiceLines: ['You thought it was over?', 'Prepare for the true challenge!'],
+      rewardBonus: 25 * floor,
+      intensity: floor >= 15 ? 'high' : 'medium',
+      vignette: 'cyan',
+      vortexColor: 'cyan',
+    });
+  }
+  return phases;
+}
+
 // ───────────────────────────────────────────────
 // Battle render
 // ───────────────────────────────────────────────
+
+// Split enemies into a top row (boss first) and bottom row (up to 4 per row).
+// Examples (count): 3 → [3], 4 → [4], 5 → [1,4], 6 → [2,4], 7 → [3,4], 8 → [4,4],
+// 9 → [1,4,4], 10 → [2,4,4], 11 → [3,4,4], 12 → [4,4,4]
+function chunkEnemyRows(enemies) {
+  const n = enemies.length;
+  if (n <= 4) return [enemies];
+  const rows = [];
+  const remainder = n % 4;
+  if (remainder === 0) {
+    // Perfectly divisible: split into 4-packs starting from index 0
+    for (let i = 0; i < n; i += 4) rows.push(enemies.slice(i, i + 4));
+  } else {
+    // Top row carries the remainder (boss + extras); then 4-packs
+    rows.push(enemies.slice(0, remainder));
+    for (let i = remainder; i < n; i += 4) rows.push(enemies.slice(i, i + 4));
+  }
+  return rows;
+}
+
+function renderEnemyRows(enemies, activeUnit) {
+  const rows = chunkEnemyRows(enemies);
+  return rows.map(row =>
+    `<div class="battle-row">${row.map(u => unitHTML(u, activeUnit)).join('')}</div>`
+  ).join('');
+}
 
 function renderBattle(activeUnit) {
   if (!battle) return;
@@ -704,9 +963,9 @@ function renderBattle(activeUnit) {
   setHTML(arena, `
     <div style="text-align:center;font-family:'Courier New',monospace;font-size:.85rem;color:var(--text-muted)">${title}</div>
     <div class="turn-order" id="turnOrder"></div>
-    <div class="battle-side" id="enemySide">${battle.enemies.map(u => unitHTML(u, activeUnit)).join('')}</div>
+    <div class="battle-side" id="enemySide">${renderEnemyRows(battle.enemies, activeUnit)}</div>
     <div class="battle-divider">— vs —</div>
-    <div class="battle-side" id="allySide">${battle.allies.map(u => unitHTML(u, activeUnit)).join('')}</div>
+    <div class="battle-side" id="allySide"><div class="battle-row">${battle.allies.map(u => unitHTML(u, activeUnit)).join('')}</div></div>
     <div class="battle-log" id="battleLog">${prevLog}</div>
   `);
   renderTurnOrder(activeUnit);
@@ -824,9 +1083,13 @@ function renderTeam() {
     { key: 'healer', label: 'Healers', color: 'var(--class-healer)' },
   ];
   const owned = HEROES.filter(h => state.owned[h.id]);
+  // Sort: level desc, then rarity desc (Epic > Rare > Common), then HP desc.
+  const rarityRank = { epic: 3, rare: 2, common: 1, basic: 0 };
   const sortWithin = arr => arr.sort((a, b) => {
     const la = state.owned[a.id].level, lb = state.owned[b.id].level;
     if (la !== lb) return lb - la;
+    const ra = rarityRank[a.rarity] || 0, rb = rarityRank[b.rarity] || 0;
+    if (ra !== rb) return rb - ra;
     return heroStats(b, lb).hp - heroStats(a, la).hp;
   });
   // On mobile, default-collapse all class sections to reduce scroll burden.
@@ -863,7 +1126,7 @@ function renderTeam() {
     </div>
     <div class="team-collection-scroll">
       <h3 style="margin-top:0">Collection</h3>
-      <div class="hero-grid" id="teamPicker">${pickerHTML}</div>
+      <div id="teamPicker">${pickerHTML}</div>
     </div>
   `);
 
@@ -871,37 +1134,123 @@ function renderTeam() {
   c.querySelectorAll('.team-slot').forEach(el => {
     el.addEventListener('click', e => {
       if (e.target.matches('[data-clear-slot]')) return;
+      if (el.classList.contains('locked')) return;
       pickingSlot = parseInt(el.dataset.slot, 10);
-      c.querySelectorAll('.team-slot').forEach(s => s.style.outline = '');
-      el.style.outline = '2px solid var(--accent)';
+      c.querySelectorAll('.team-slot').forEach(s => s.classList.remove('active-pick'));
+      el.classList.add('active-pick');
     });
   });
   c.querySelectorAll('[data-clear-slot]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const i = parseInt(btn.dataset.clearSlot, 10);
-      state.team[i] = null;
-      saveState(); renderTeam();
+      const slotEl = c.querySelector(`.team-slot[data-slot="${i}"]`);
+      if (slotEl) slotEl.classList.add('removing');
+      setTimeout(() => {
+        state.team[i] = null;
+        saveState();
+        renderTeam();
+      }, 280);
     });
   });
   c.querySelectorAll('#teamPicker .hero-card').forEach(card => {
     card.addEventListener('click', () => {
       const id = card.dataset.heroId;
-      if (pickingSlot == null) {
+      // If no slot picked, default to first empty
+      let targetSlot = pickingSlot;
+      if (targetSlot == null) {
         const empty = state.team.indexOf(null);
         if (empty === -1) { setLog('Pick a slot first to swap a hero.'); return; }
-        pickingSlot = empty;
+        targetSlot = empty;
       }
+      // Source flash
+      card.classList.remove('selecting');
+      void card.offsetWidth;
+      card.classList.add('selecting');
+
+      // If hero is already in another slot, clear that slot first (state-only)
       if (state.team.includes(id)) {
         const otherIdx = state.team.indexOf(id);
         state.team[otherIdx] = null;
       }
-      state.team[pickingSlot] = id;
-      pickingSlot = null;
-      saveState(); renderTeam();
+
+      // Get destination slot rect for the fly animation
+      const slotEl = c.querySelector(`.team-slot[data-slot="${targetSlot}"]`);
+      if (slotEl) {
+        spawnFlyClone(card, slotEl, heroById(id));
+      }
+
+      // Apply the change after the fly animation completes
+      setTimeout(() => {
+        state.team[targetSlot] = id;
+        pickingSlot = null;
+        saveState();
+        renderTeam();
+        // After re-render, find the new slot element and trigger landing animation
+        requestAnimationFrame(() => {
+          const newSlotEl = document.querySelector(`#tab-team .team-slot[data-slot="${targetSlot}"]`);
+          if (newSlotEl) {
+            newSlotEl.classList.add('landing');
+            spawnSlotSparkles(newSlotEl);
+            setTimeout(() => newSlotEl.classList.remove('landing'), 480);
+          }
+        });
+      }, 420);
     });
   });
   wireClassSectionToggles(c);
+}
+
+// Spawn a fly-to-slot clone of the source hero card.
+function spawnFlyClone(sourceEl, destEl, hero) {
+  const srcRect = sourceEl.getBoundingClientRect();
+  const dstRect = destEl.getBoundingClientRect();
+  const clone = document.createElement('div');
+  clone.className = 'fly-clone';
+  clone.style.left = srcRect.left + 'px';
+  clone.style.top  = srcRect.top  + 'px';
+  clone.style.width  = srcRect.width  + 'px';
+  clone.style.height = srcRect.height + 'px';
+
+  // Inner content: portrait + name (kept simple so the clone reads at small size)
+  const portrait = document.createElement('div');
+  portrait.innerHTML = iconHTML(HERO_ICONS[hero.id], `tint-${hero.rarity}`, 56);
+  const name = document.createElement('div');
+  name.className = 'clone-name';
+  name.textContent = hero.name;
+  clone.appendChild(portrait);
+  clone.appendChild(name);
+  document.body.appendChild(clone);
+
+  // Force reflow then transition
+  requestAnimationFrame(() => {
+    const dx = (dstRect.left + dstRect.width / 2) - (srcRect.left + srcRect.width / 2);
+    const dy = (dstRect.top  + dstRect.height / 2) - (srcRect.top  + srcRect.height / 2);
+    clone.style.transform = `translate(${dx}px,${dy}px) scale(.55)`;
+    clone.style.opacity = '.85';
+  });
+  setTimeout(() => clone.remove(), 460);
+}
+
+// Spawn 4 sparkle particles bursting from a slot's corners.
+function spawnSlotSparkles(slotEl) {
+  const corners = [
+    { x:  20, y:  20 },
+    { x: -20, y:  20 },
+    { x:  20, y: -20 },
+    { x: -20, y: -20 },
+  ];
+  corners.forEach((c, i) => {
+    const s = document.createElement('div');
+    s.className = 'slot-sparkle';
+    s.style.left = '50%';
+    s.style.top = '50%';
+    s.style.setProperty('--sx', c.x + 'px');
+    s.style.setProperty('--sy', c.y + 'px');
+    s.style.animationDelay = (i * 30) + 'ms';
+    slotEl.appendChild(s);
+    setTimeout(() => s.remove(), 700);
+  });
 }
 
 function renderSummon() {
@@ -1051,10 +1400,44 @@ function revealSlot(idx, result) {
   slot.appendChild(stars);
 
   if (!result.isNew) {
+    const gained = result.shardsGained || 1;
+    // Tier = raw gained for commons (always 1), but for Rare/Epic map to
+    // the tier CSS classes so more shards = more drama.
+    let tier = 1;
+    if (hero.rarity === 'rare')      tier = Math.min(3, gained);            // 1..3
+    else if (hero.rarity === 'epic') tier = Math.min(5, Math.max(1, gained));// 1..5
     const shard = document.createElement('div');
-    shard.className = 'pull-shard-note';
-    shard.textContent = '+1 shard';
+    shard.className = 'pull-shard-note tier-' + tier;
+    shard.textContent = `+${gained} shard${gained > 1 ? 's' : ''}`;
     slot.appendChild(shard);
+    // High-tier rewards get sparkle particles bursting from the shard note
+    if (tier >= 3) spawnShardSparkles(shard, tier, hero.rarity);
+    // Jackpot: tier 5 (Epic +5) gets a full slot shake
+    if (tier === 5) {
+      slot.classList.add('jackpot-shake');
+      setTimeout(() => slot.classList.remove('jackpot-shake'), 700);
+    }
+  }
+}
+
+// Spawn sparkle particles that burst outward from the shard-note text.
+function spawnShardSparkles(shardEl, tier, rarity) {
+  const count = tier + 1; // tier 3 = 4, tier 4 = 5, tier 5 = 6
+  const variant = rarity === 'epic' ? ' epic' : '';
+  for (let i = 0; i < count; i++) {
+    const angle = (Math.PI * 2) * (i / count) + Math.random() * 0.4;
+    const distance = 26 + Math.random() * 14;
+    const dx = Math.cos(angle) * distance;
+    const dy = Math.sin(angle) * distance - 6;
+    const s = document.createElement('div');
+    s.className = 'shard-sparkle' + variant;
+    s.style.left = '50%';
+    s.style.top = '50%';
+    s.style.setProperty('--sx', dx + 'px');
+    s.style.setProperty('--sy', dy + 'px');
+    s.style.animationDelay = (i * 40) + 'ms';
+    shardEl.appendChild(s);
+    setTimeout(() => s.remove(), 1100);
   }
 }
 
@@ -1146,10 +1529,14 @@ function renderTower() {
       <button class="btn btn-gold" id="towerFightBtn" style="margin-top:10px">Fight Floor ${state.tower.floor}</button>
     </div>
   `);
-  document.getElementById('towerFightBtn').onclick = () => startBattle('tower', { floor: state.tower.floor });
+  document.getElementById('towerFightBtn').onclick = () => {
+    const floor = state.tower.floor;
+    startBattle('tower', { floor, phases: buildTowerPhases(floor) });
+  };
 }
 
-function renderCollection() {
+function renderCollection(opts) {
+  opts = opts || {};
   const c = document.getElementById('tab-collection');
   // Group all heroes (owned + locked) by class; owned first within class, sorted by level/HP.
   const classOrder = [
@@ -1158,12 +1545,15 @@ function renderCollection() {
     { key: 'rogue',  label: 'Rogues',  color: 'var(--class-rogue)'  },
     { key: 'healer', label: 'Healers', color: 'var(--class-healer)' },
   ];
+  const rarityRank = { epic: 3, rare: 2, common: 1, basic: 0 };
   const sortHeroes = arr => arr.sort((a, b) => {
     const oa = !!state.owned[a.id], ob = !!state.owned[b.id];
     if (oa !== ob) return oa ? -1 : 1;
     if (!oa) return 0;
     const la = state.owned[a.id].level, lb = state.owned[b.id].level;
     if (la !== lb) return lb - la;
+    const ra = rarityRank[a.rarity] || 0, rb = rarityRank[b.rarity] || 0;
+    if (ra !== rb) return rb - ra;
     return heroStats(b, lb).hp - heroStats(a, la).hp;
   });
   const collapseDefault = isMobile() ? ' collapsed' : '';
@@ -1204,16 +1594,20 @@ function renderCollection() {
       playLevelUpCelebration(card, hero, before, after, hitMax);
       updateHeader();
       updateCollectionTabBadge();
-      setTimeout(() => renderCollection(), 1500);
+      setTimeout(() => renderCollection({ skipAutoScroll: true }), 1500);
     });
   });
   wireClassSectionToggles(c);
-  // Auto-scroll to first ready card — first expand its section if collapsed.
-  const firstReady = c.querySelector('.hero-card.ready-shimmer');
-  if (firstReady) {
-    const section = firstReady.closest('.class-section');
-    if (section) section.classList.remove('collapsed');
-    setTimeout(() => firstReady.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+  // Auto-scroll to first ready card on initial open only — never on
+  // re-renders triggered by level-up (would yank the view away from the
+  // card the player just clicked).
+  if (!opts.skipAutoScroll) {
+    const firstReady = c.querySelector('.hero-card.ready-shimmer');
+    if (firstReady) {
+      const section = firstReady.closest('.class-section');
+      if (section) section.classList.remove('collapsed');
+      setTimeout(() => firstReady.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
+    }
   }
 }
 

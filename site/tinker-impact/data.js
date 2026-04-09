@@ -22,6 +22,18 @@ const SHARDS_PER_LEVEL = 5;
 const LEVEL_MULT = 0.15; // stat = base × (1 + (level - 1) × LEVEL_MULT)
 const MAX_LEVEL_EVER = 10; // absolute ceiling across all tiers
 
+// Dupe-only bonus shards by rarity — uniform random in range.
+// Common still gives 1 shard per dupe; Rare and Epic scale with rarity.
+const DUPE_SHARD_RANGE = {
+  common: [1, 1],
+  rare:   [1, 3],
+  epic:   [1, 5],
+};
+function shardsPerDupe(rarity) {
+  const [lo, hi] = DUPE_SHARD_RANGE[rarity] || [1, 1];
+  return lo + Math.floor(Math.random() * (hi - lo + 1));
+}
+
 // ───────────────────────────────────────────────
 // Classes
 // ───────────────────────────────────────────────
@@ -280,6 +292,65 @@ const ENEMY_KINDS = {
     types: ['G','G','G'], // boss tier — always red
     isBoss: true,
   },
+  // Phase 2 enemies (3-5) — the "true form" wave
+  'shadow-lord-awakened': {
+    name: 'Shadow Lord Awakened', class: 'mage',
+    icon: 'delapouite/devil-mask',
+    types: ['G','G','G'],
+    isBoss: true,
+    hpMult: 2.0, // special flag — doubled HP from normal
+  },
+  'shadow-archon': {
+    name: 'Shadow Archon', class: 'healer',
+    icon: 'delapouite/warlock-hood',
+    types: ['G','G','G'],
+  },
+  'shadow-vanguard': {
+    name: 'Shadow Vanguard', class: 'knight',
+    icon: 'delapouite/dwarf-face',
+    types: ['G','G','G'],
+  },
+  'shadow-executioner': {
+    name: 'Shadow Executioner', class: 'rogue',
+    icon: 'lorc/spectre',
+    types: ['G','G','G'],
+  },
+  'void-warlock': {
+    name: 'Void Warlock', class: 'mage',
+    icon: 'delapouite/warlock-eye',
+    types: ['G','G','G'],
+  },
+  // Phase 2 enemies for 2-5 (ice family, type E/F)
+  'yeti-emperor': {
+    name: 'Yeti Emperor', class: 'knight',
+    icon: 'delapouite/golem-head',
+    types: ['F','F','F'],
+    isBoss: true,
+    hpMult: 2.0,
+  },
+  'frost-shaman': {
+    name: 'Frost Shaman', class: 'mage',
+    icon: 'delapouite/warlock-hood',
+    types: ['F','F','F'],
+  },
+  'ice-guardian': {
+    name: 'Ice Guardian', class: 'knight',
+    icon: 'delapouite/dwarf-face',
+    types: ['F','F','F'],
+  },
+  'glacial-wraith': {
+    name: 'Glacial Wraith', class: 'rogue',
+    icon: 'lorc/ghost',
+    types: ['E','F','F'],
+  },
+  // Phase 3 boss for 3-5 — "true darkness" form with triple HP
+  'shadow-lord-eternal': {
+    name: 'Shadow Lord Eternal', class: 'mage',
+    icon: 'delapouite/devil-mask',
+    types: ['G','G','G'],
+    isBoss: true,
+    hpMult: 3.0,
+  },
 };
 
 // ───────────────────────────────────────────────
@@ -308,7 +379,28 @@ const CAMPAIGN = [
       { id: '2-2', name: 'Ice Cavern',    enemies: [enemy('ice-sprite', 4), enemy('ice-sprite', 4), enemy('cave-bear', 3)] },
       { id: '2-3', name: 'Glacier Path',  enemies: [enemy('yeti-cub', 5), enemy('yeti-cub', 5), enemy('frost-mage', 3)] },
       { id: '2-4', name: 'Frozen Shrine', enemies: [enemy('ice-priest', 4), enemy('frost-knight', 4), enemy('frost-wraith', 3)] },
-      { id: '2-5', name: 'The Yeti King', enemies: [enemy('yeti-king', 4), enemy('frost-mage', 5), enemy('frost-wolf', 5)] },
+      {
+        id: '2-5', name: 'The Yeti King',
+        phases: [
+          {
+            enemies: [enemy('yeti-king', 4), enemy('frost-mage', 5), enemy('frost-wolf', 5)],
+          },
+          {
+            enemies: [
+              enemy('yeti-emperor', 5),
+              enemy('frost-shaman', 5),
+              enemy('ice-guardian', 5),
+              enemy('glacial-wraith', 5),
+            ],
+            bannerText: 'PHASE 2',
+            voiceLines: ['The ice remembers every wound...', 'You will not leave this pass alive!'],
+            rewardBonus: 250,
+            intensity: 'medium',
+            vignette: 'cyan',
+            vortexColor: 'cyan',
+          },
+        ],
+      },
     ],
   },
   {
@@ -319,7 +411,49 @@ const CAMPAIGN = [
       { id: '3-2', name: 'Cursed Halls',  enemies: [enemy('wraith', 6), enemy('wraith', 6), enemy('cult-healer', 5), enemy('shadow-guard', 5)] },
       { id: '3-3', name: 'Throne Room',   enemies: [enemy('cult-mage', 6), enemy('shadow-knight', 6), enemy('shadow-archer', 6), enemy('cult-healer', 6)] },
       { id: '3-4', name: 'Inner Sanctum', enemies: [enemy('high-priest', 5), enemy('shadow-knight', 7), enemy('wraith', 7), enemy('cult-mage', 6), enemy('wraith', 7)] },
-      { id: '3-5', name: 'The Shadow Lord', enemies: [enemy('the-shadow-lord', 6), enemy('shadow-knight', 8), enemy('shadow-knight', 8), enemy('wraith', 8), enemy('cult-healer', 7)] },
+      {
+        id: '3-5', name: 'The Shadow Lord',
+        phases: [
+          {
+            enemies: [enemy('the-shadow-lord', 6), enemy('shadow-knight', 8), enemy('shadow-knight', 8), enemy('wraith', 8), enemy('cult-healer', 7)],
+          },
+          {
+            enemies: [
+              enemy('shadow-lord-awakened', 7),
+              enemy('shadow-archon', 7),
+              enemy('shadow-vanguard', 8),
+              enemy('shadow-executioner', 8),
+              enemy('void-warlock', 7),
+            ],
+            bannerText: 'PHASE 2',
+            voiceLines: ['You dare strike me down?', 'Witness my true form!'],
+            rewardBonus: 500,
+            intensity: 'high',
+            vignette: 'red',
+            vortexColor: 'purple',
+          },
+          {
+            enemies: [
+              enemy('shadow-lord-eternal', 8),
+              enemy('shadow-archon', 8),
+              enemy('shadow-archon', 8),
+              enemy('shadow-vanguard', 9),
+              enemy('void-warlock', 8),
+              enemy('shadow-executioner', 9),
+            ],
+            bannerText: 'PHASE 3 — TRUE DARKNESS',
+            voiceLines: [
+              'Impossible... you survived my second form...',
+              'Then I shall reveal the true darkness.',
+              'Witness the end of all light!',
+            ],
+            rewardBonus: 1000,
+            intensity: 'max',
+            vignette: 'darkred',
+            vortexColor: 'purple',
+          },
+        ],
+      },
     ],
   },
 ];
