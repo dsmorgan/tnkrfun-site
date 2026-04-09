@@ -276,6 +276,73 @@ function traitCapFor(horse) {
 // Append a styled sex pill onto a parent element, plus optional surrounding text.
 // Callers that currently use `.textContent = 'X • mare • Y'` should instead
 // clear textContent and call appendSexLine(el, [before], horse, [after]).
+// ── Rarity reveal animations ──
+
+// Play the appropriate catch/reveal animation on a container element.
+// Container should be position:relative for shockwave/ring/text/confetti.
+function playRarityReveal(container, rarity) {
+  if (!rarity || rarity === 'common') return;
+  container.style.position = 'relative';
+  container.style.overflow = 'visible';
+
+  if (rarity === 'rare') {
+    container.classList.add('catch-reveal-rare');
+    // Glow ring
+    const ring = document.createElement('div');
+    ring.className = 'rare-glow-ring';
+    container.appendChild(ring);
+    setTimeout(() => ring.remove(), 750);
+    // "★★ RARE" text
+    const text = document.createElement('div');
+    text.className = 'epic-rarity-text rare';
+    text.textContent = '★★ RARE';
+    container.appendChild(text);
+    setTimeout(() => { text.remove(); container.classList.remove('catch-reveal-rare'); }, 1000);
+  }
+
+  if (rarity === 'epic') {
+    // Screen dim
+    const dim = document.createElement('div');
+    dim.className = 'catch-epic-dim';
+    document.body.appendChild(dim);
+    setTimeout(() => dim.remove(), 1900);
+    // Shockwave
+    const wave = document.createElement('div');
+    wave.className = 'epic-shockwave';
+    container.appendChild(wave);
+    setTimeout(() => wave.remove(), 1100);
+    // "★★★ EPIC!" text
+    const text = document.createElement('div');
+    text.className = 'epic-rarity-text epic';
+    text.textContent = '★★★ EPIC!';
+    container.appendChild(text);
+    setTimeout(() => text.remove(), 1800);
+    // Confetti burst
+    spawnRarityConfetti(container, 16);
+  }
+}
+
+function spawnRarityConfetti(container, count) {
+  const colors = ['#ffcc33', '#d8a0ff', '#39ff14', '#ff9500', '#7ec0ff', '#ff9ec4'];
+  for (let i = 0; i < count; i++) {
+    const p = document.createElement('div');
+    p.className = 'rarity-confetti';
+    p.style.background = colors[i % colors.length];
+    const angle = (Math.PI * 2) * (i / count) + Math.random() * 0.3;
+    const distance = 60 + Math.random() * 50;
+    const dx = Math.cos(angle) * distance;
+    const dy = Math.sin(angle) * distance - 20;
+    const rot = (Math.random() * 720 - 360);
+    container.appendChild(p);
+    requestAnimationFrame(() => {
+      p.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) rotate(${rot}deg) scale(.5)`;
+      p.style.transition = 'transform 1.2s cubic-bezier(.3,.9,.5,1), opacity 1.2s ease-out';
+      p.style.opacity = '0';
+    });
+    setTimeout(() => p.remove(), 1400);
+  }
+}
+
 function makeSexBadge(sex) {
   const span = document.createElement('span');
   span.className = 'sex-badge sex-' + sex;
@@ -648,6 +715,7 @@ function endDay() {
       const entry = state.nursery[i];
       const foal = breedHorse(entry.parentAId, entry.parentBId, entry.parentAData, entry.parentBData);
       if (foal) {
+        foal.isNew = true; // flag for stable NEW ribbon
         state.stable.push(foal);
         newFoals.push(foal);
       } else {
@@ -751,9 +819,11 @@ function showDaySummary(summary, newFoals) {
   if (newFoals && newFoals.length > 0) {
     const foalSection = document.createElement('div');
     foalSection.style.cssText = 'display:flex;gap:10px;margin-top:12px;flex-wrap:wrap';
-    newFoals.forEach(foal => {
+    newFoals.forEach((foal, idx) => {
       const card = document.createElement('div');
-      card.style.cssText = 'display:flex;align-items:center;gap:8px;background:var(--bg-card);border-radius:var(--radius);padding:8px 10px;border-left:3px solid var(--gold)';
+      card.style.cssText = 'display:flex;align-items:center;gap:8px;background:var(--bg-card);border-radius:var(--radius);padding:8px 10px;border-left:3px solid var(--gold);position:relative;overflow:visible';
+      if (foal.rarity === 'rare') card.classList.add('foal-birth-rare');
+      if (foal.rarity === 'epic') card.classList.add('foal-birth-epic');
 
       const portrait = document.createElement('div');
       portrait.className = 'horse-portrait';
@@ -768,11 +838,17 @@ function showDaySummary(summary, newFoals) {
       info.appendChild(nameLine);
       const detailLine = document.createElement('div');
       detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
-      detailLine.textContent = foal.coat.fullName + ' ' + foal.breedLabel;
+      detailLine.textContent = foal.coat.fullName + ' ' + foal.breedLabel + ' \u2022 ';
+      appendBadges(detailLine, foal);
       info.appendChild(detailLine);
       card.appendChild(info);
 
       foalSection.appendChild(card);
+
+      // Play rarity reveal animation with a stagger for multiple foals
+      if (foal.rarity && foal.rarity !== 'common') {
+        setTimeout(() => playRarityReveal(card, foal.rarity), 400 + idx * 600);
+      }
     });
     modal.appendChild(foalSection);
   }
@@ -1088,6 +1164,11 @@ function renderStable() {
   state.stable.forEach(horse => {
     grid.appendChild(createHorseCard(horse));
   });
+  // Clear isNew flags after rendering so ribbons show once per stable visit
+  setTimeout(() => {
+    state.stable.forEach(h => { if (h.isNew) h.isNew = false; });
+    saveState();
+  }, 3000);
 
   container.appendChild(grid);
 
@@ -1106,6 +1187,18 @@ function createHorseCard(horse) {
     stars.className = 'rarity-badge rarity-' + horse.rarity;
     stars.textContent = '★'.repeat(RARITY[horse.rarity].stars);
     card.appendChild(stars);
+  }
+
+  // NEW ribbon for recently caught/born horses
+  if (horse.isNew) {
+    const ribbon = document.createElement('div');
+    ribbon.className = 'new-ribbon';
+    ribbon.textContent = 'NEW';
+    card.appendChild(ribbon);
+    // Shimmer sweep on new Rare/Epic
+    if (horse.rarity && horse.rarity !== 'common') {
+      card.classList.add('new-shimmer');
+    }
   }
 
   // Portrait
@@ -2858,6 +2951,7 @@ function attemptCatch(horse, catchRate) {
   const success = Math.random() < catchRate;
 
   if (success) {
+    horse.isNew = true; // flag for stable NEW ribbon
     state.stable.push(horse);
     // Track in bestiary
     state.bestiary[horse.breed] = (state.bestiary[horse.breed] || 0) + 1;
@@ -2888,6 +2982,10 @@ function showCatchResult(success, horse) {
   if (success) {
     msg.style.color = 'var(--accent)';
     msg.textContent = 'Success! ' + horse.name + ' has been added to your stable!';
+    // Rarity reveal animation (delayed slightly so the panel is visible)
+    if (horse.rarity && horse.rarity !== 'common') {
+      setTimeout(() => playRarityReveal(panel, horse.rarity), 200);
+    }
   } else {
     msg.style.color = 'var(--red)';
     msg.textContent = 'The horse bolted! ' + horse.coat.fullName + ' ' + horse.breedLabel + ' escaped into the wild.';

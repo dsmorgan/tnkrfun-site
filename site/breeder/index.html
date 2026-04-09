@@ -206,6 +206,157 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
 }
 .elite-trait strong{color:#d8a0ff;letter-spacing:.04em}
 .lineage-gone{color:var(--text-muted);font-style:italic;opacity:.65;text-decoration:line-through;text-decoration-thickness:1px}
+
+/* ── Rarity reveal animations ───────────────── */
+
+/* Catch: rare gold border flash */
+.catch-reveal-rare{
+  animation:catchRareFlash .6s ease-out;
+}
+@keyframes catchRareFlash{
+  0%  {box-shadow:0 0 0 0 rgba(255,204,51,.9);filter:brightness(1)}
+  30% {box-shadow:0 0 30px 8px rgba(255,204,51,.9);filter:brightness(1.4) saturate(1.4)}
+  100%{box-shadow:0 0 14px rgba(255,204,51,.45);filter:brightness(1)}
+}
+
+/* Catch: rare glow ring expanding from portrait */
+.rare-glow-ring{
+  position:absolute;top:50%;left:50%;
+  width:30px;height:30px;border-radius:50%;
+  border:3px solid #ffcc33;
+  transform:translate(-50%,-50%) scale(.3);
+  animation:rareGlowRing .7s ease-out forwards;
+  pointer-events:none;z-index:4;
+  box-shadow:0 0 14px rgba(255,204,51,.8);
+}
+@keyframes rareGlowRing{
+  0%  {transform:translate(-50%,-50%) scale(.3);opacity:1;border-width:4px}
+  100%{transform:translate(-50%,-50%) scale(3);opacity:0;border-width:1px}
+}
+
+/* Catch: epic screen dim overlay */
+.catch-epic-dim{
+  position:fixed;inset:0;pointer-events:none;z-index:300;
+  background:rgba(0,0,0,.7);
+  animation:catchEpicDim 1.8s ease-out forwards;
+}
+@keyframes catchEpicDim{
+  0%  {opacity:0}
+  15% {opacity:1}
+  80% {opacity:1}
+  100%{opacity:0}
+}
+
+/* Catch: epic purple shockwave */
+.epic-shockwave{
+  position:absolute;top:50%;left:50%;
+  width:40px;height:40px;border-radius:50%;
+  border:4px solid #d8a0ff;
+  transform:translate(-50%,-50%) scale(.3);
+  animation:epicShockwave 1s ease-out forwards;
+  pointer-events:none;z-index:5;
+  box-shadow:0 0 30px rgba(216,160,255,.95),0 0 60px rgba(168,85,247,.7);
+}
+@keyframes epicShockwave{
+  0%  {transform:translate(-50%,-50%) scale(.3);opacity:1;border-width:5px}
+  100%{transform:translate(-50%,-50%) scale(5);opacity:0;border-width:1px}
+}
+
+/* Epic text banner over catch/foal card */
+.epic-rarity-text{
+  position:absolute;top:30%;left:50%;
+  transform:translate(-50%,-50%) scale(.3);
+  font-family:'Courier New',monospace;
+  font-size:1.8rem;font-weight:700;
+  letter-spacing:.1em;
+  pointer-events:none;z-index:6;
+  white-space:nowrap;
+  animation:epicTextPop 1.6s ease-out forwards;
+}
+.epic-rarity-text.rare{
+  color:#ffcc33;font-size:1.3rem;
+  text-shadow:0 0 10px rgba(255,204,51,.9),0 0 4px #000;
+  animation:rareTextPop .9s ease-out forwards;
+}
+.epic-rarity-text.epic{
+  color:#d8a0ff;
+  text-shadow:0 0 14px rgba(216,160,255,1),0 0 6px rgba(168,85,247,.9),0 0 4px #000;
+}
+@keyframes rareTextPop{
+  0%  {transform:translate(-50%,-50%) scale(.5);opacity:0}
+  40% {transform:translate(-50%,-50%) scale(1.15);opacity:1}
+  100%{transform:translate(-50%,-50%) scale(1);opacity:1}
+}
+@keyframes epicTextPop{
+  0%  {transform:translate(-50%,-50%) scale(.3);opacity:0}
+  25% {transform:translate(-50%,-50%) scale(1.3);opacity:1}
+  50% {transform:translate(-50%,-50%) scale(.95);opacity:1}
+  100%{transform:translate(-50%,-50%) scale(1);opacity:1}
+}
+
+/* Rarity confetti particles */
+.rarity-confetti{
+  position:absolute;top:50%;left:50%;
+  width:6px;height:6px;border-radius:1px;
+  pointer-events:none;z-index:5;
+  opacity:1;
+}
+
+/* ── Stable: NEW ribbon + shimmer on new horses ── */
+.horse-card .new-ribbon{
+  position:absolute;top:6px;right:8px;
+  font-family:'Courier New',monospace;font-size:.6rem;font-weight:700;
+  letter-spacing:.1em;color:#0d0d1a;
+  background:var(--accent);
+  padding:2px 8px;border-radius:8px;
+  box-shadow:0 0 8px rgba(57,255,20,.6);
+  z-index:3;pointer-events:none;
+  animation:newRibbonPop .5s ease-out;
+}
+@keyframes newRibbonPop{
+  0%  {transform:scale(.4) translateY(-10px);opacity:0}
+  100%{transform:scale(1) translateY(0);opacity:1}
+}
+
+/* Shimmer sweep on new Rare/Epic horses in stable */
+.horse-card.new-shimmer{overflow:hidden}
+.horse-card.new-shimmer::after{
+  content:'';
+  position:absolute;top:0;left:-120%;
+  width:60%;height:100%;
+  background:linear-gradient(100deg,transparent 25%,rgba(255,255,255,.18) 45%,rgba(255,255,255,.35) 50%,rgba(255,255,255,.18) 55%,transparent 75%);
+  transform:skewX(-18deg);
+  animation:newShimmerSweep 2.8s ease-in-out infinite;
+  pointer-events:none;z-index:2;
+}
+@keyframes newShimmerSweep{
+  0%,70%,100%{left:-120%}
+  85%        {left:120%}
+}
+
+/* Foal birth: rare highlight in day summary */
+.foal-birth-rare{
+  border-left-color:#ffcc33!important;
+  color:#ffcc33!important;
+  box-shadow:0 0 12px rgba(255,204,51,.3);
+  animation:foalBirthRareGlow 1.5s ease-out;
+}
+@keyframes foalBirthRareGlow{
+  0%  {box-shadow:0 0 0 rgba(255,204,51,0)}
+  40% {box-shadow:0 0 20px rgba(255,204,51,.6)}
+  100%{box-shadow:0 0 12px rgba(255,204,51,.3)}
+}
+
+/* Foal birth: epic card in day summary — purple glow */
+.foal-birth-epic{
+  border-left-color:#d8a0ff!important;
+  box-shadow:0 0 20px rgba(216,160,255,.6),inset 0 0 10px rgba(168,85,247,.15);
+  animation:foalBirthEpicPulse 1.8s ease-in-out infinite;
+}
+@keyframes foalBirthEpicPulse{
+  0%,100%{box-shadow:0 0 14px rgba(216,160,255,.5),inset 0 0 8px rgba(168,85,247,.1)}
+  50%    {box-shadow:0 0 28px rgba(216,160,255,.9),inset 0 0 16px rgba(168,85,247,.3)}
+}
 .sex-badge{
   display:inline-block;
   padding:1px 7px;border-radius:10px;
