@@ -383,35 +383,43 @@ function pickTarget(actor) {
   return live[Math.floor(Math.random() * live.length)];
 }
 
+// performAction returns an ActionResult describing what should happen,
+// without mutating HP. The orchestrator applies HP changes after the windup
+// so the visuals and numbers are in sync.
+// ActionResult: { kind, impacts: [{ target, dmg?, heal?, fx, fxVariant? }], label }
 function performAction(actor) {
+  const impacts = [];
   if (actor.class === 'healer') {
     const allies = liveUnits(actor.side);
     const wounded = allies.filter(u => u.hp < u.maxHp);
     if (wounded.length > 0) {
       const target = wounded.sort((a, b) => (a.hp / a.maxHp) - (b.hp / b.maxHp))[0];
       const amount = Math.round(actor.atk * 3);
-      target.hp = Math.min(target.maxHp, target.hp + amount);
-      flashUnit(target, `+${amount}`, 'heal');
-      return;
+      impacts.push({ target, heal: amount, fx: 'healer' });
+      return { kind: 'heal', impacts, label: `${actor.name} heals ${target.name} for ${amount}` };
     }
+    // Fall through if nobody wounded (no-op this turn)
+    return { kind: 'noop', impacts: [], label: `${actor.name} stands ready` };
   }
   if (actor.class === 'mage') {
     const enemies = liveUnits(actor.side === 'ally' ? 'enemy' : 'ally');
+    let fxVariant = 'arcane';
+    if (/frost|ice|frozen/i.test(actor.name))       fxVariant = 'ice';
+    else if (/pyro|fire|flame/i.test(actor.name))   fxVariant = 'fire';
     enemies.forEach(t => {
       const dmg = Math.max(1, Math.round(actor.atk * 0.75));
-      t.hp = Math.max(0, t.hp - dmg);
-      flashUnit(t, `-${dmg}`, 'dmg');
+      impacts.push({ target: t, dmg, fx: 'mage', fxVariant });
     });
-    return;
+    return { kind: 'aoe', impacts, label: `${actor.name} casts on ${enemies.length} enemies` };
   }
   const target = pickTarget(actor);
-  if (!target) return;
+  if (!target) return { kind: 'noop', impacts: [], label: '' };
   let dmg = actor.atk;
-  if (actor.class === 'rogue') dmg = Math.round(dmg * 1.3);
+  if (actor.class === 'rogue')  dmg = Math.round(dmg * 1.3);
   if (actor.class === 'knight') dmg = Math.round(dmg * 0.9);
   dmg = Math.max(1, dmg);
-  target.hp = Math.max(0, target.hp - dmg);
-  flashUnit(target, `-${dmg}`, 'dmg');
+  impacts.push({ target, dmg, fx: actor.class });
+  return { kind: 'attack', impacts, label: `${actor.name} strikes ${target.name} for ${dmg}` };
 }
 
 function checkBattleEnd() {
@@ -426,9 +434,14 @@ function checkBattleEnd() {
   return false;
 }
 
+// ── Battle pacing constants ──
+const TICK_GAP        = 900;  // full time budget per action turn
+const WINDUP_MS       = 250;  // lunge anticipation before damage applies
+const IMPACT_HOLD_MS  = 450;  // let flinch/FX play before next action
+
 function scheduleNextTick() {
   if (!battle || battle.over) return;
-  setTimeout(runBattleTick, 600);
+  setTimeout(runBattleTick, TICK_GAP);
 }
 
 function runBattleTick() {
@@ -439,19 +452,145 @@ function runBattleTick() {
   battle.time = actor.nextAct;
   actor.nextAct += 100 / actor.spd;
 
-  renderBattle(actor);
-  performAction(actor);
-  // Healer passive: after each ally action, tick regen on the actor itself.
-  if (actor.side === 'ally' && actor.regen && actor.hp > 0 && actor.hp < actor.maxHp) {
-    actor.hp = Math.min(actor.maxHp, actor.hp + actor.regen);
-    flashUnit(actor, `+${actor.regen}`, 'heal');
-  }
+  renderBattle(actor); // rebuild arena so previous turn's classes clear
+  const result = performAction(actor);
+
+  // Log the intended action
+  if (result.label) logAction(result.label);
+
+  // Windup: lunge the actor toward the target side BEFORE damage lands.
+  setTimeout(() => {
+    if (!battle) return;
+    lungeActor(actor);
+  }, 0);
+
+  // Apply impact after the windup beat
+  setTimeout(() => {
+    if (!battle) return;
+    applyImpacts(actor, result);
+    // Healer passive: after each ally action, tick regen on the actor itself.
+    if (actor.side === 'ally' && actor.regen && actor.hp > 0 && actor.hp < actor.maxHp) {
+      actor.hp = Math.min(actor.maxHp, actor.hp + actor.regen);
+      flashUnit(actor, `+${actor.regen}`, 'heal');
+    }
+  }, WINDUP_MS);
+
+  // After the impact plays out, check for battle end or schedule next actor.
   setTimeout(() => {
     if (!battle) return;
     renderBattle(actor);
     if (checkBattleEnd()) return;
     scheduleNextTick();
-  }, 250);
+  }, WINDUP_MS + IMPACT_HOLD_MS);
+}
+
+// Apply damage/heal, spawn FX, flinch/heal-glow targets, screen-shake for big hits.
+function applyImpacts(actor, result) {
+  if (!result || !result.impacts || result.impacts.length === 0) return;
+  let killCount = 0;
+  result.impacts.forEach(impact => {
+    const { target, dmg, heal, fx, fxVariant } = impact;
+    // Spawn the FX on the target (or on self for healer->target)
+    spawnAttackFX(target, fx, fxVariant);
+    if (dmg != null) {
+      target.hp = Math.max(0, target.hp - dmg);
+      flashUnit(target, `-${dmg}`, 'dmg');
+      flinchUnit(target);
+      if (target.hp <= 0) {
+        killCount++;
+        markUnitDying(target);
+      }
+    } else if (heal != null) {
+      target.hp = Math.min(target.maxHp, target.hp + heal);
+      flashUnit(target, `+${heal}`, 'heal');
+      healGlowUnit(target);
+    }
+  });
+  // Screen shake triggers
+  const arena = document.getElementById('battleArena');
+  if (!arena) return;
+  if (killCount > 0) triggerShake(arena, 'heavy');
+  else if (result.kind === 'aoe' && result.impacts.length >= 3) triggerShake(arena, 'light');
+  else if (actor.rarity === 'epic') triggerShake(arena, 'light');
+}
+
+function triggerShake(arena, kind) {
+  const cls = kind === 'heavy' ? 'shake-heavy' : 'shake-light';
+  arena.classList.remove(cls);
+  void arena.offsetWidth; // restart animation
+  arena.classList.add(cls);
+  setTimeout(() => arena.classList.remove(cls), 450);
+}
+
+function lungeActor(actor) {
+  const el = unitEl(actor);
+  if (!el) return;
+  // Allies are on the bottom row, lunge up. Enemies on top, lunge down.
+  el.classList.add(actor.side === 'ally' ? 'lunge-up' : 'lunge-down');
+  setTimeout(() => el.classList.remove('lunge-up', 'lunge-down'), 240);
+}
+
+function flinchUnit(unit) {
+  const el = unitEl(unit);
+  if (!el) return;
+  el.classList.remove('flinch');
+  void el.offsetWidth;
+  el.classList.add('flinch');
+  setTimeout(() => el.classList.remove('flinch'), 340);
+}
+
+function healGlowUnit(unit) {
+  const el = unitEl(unit);
+  if (!el) return;
+  el.classList.remove('heal-glow');
+  void el.offsetWidth;
+  el.classList.add('heal-glow');
+  setTimeout(() => el.classList.remove('heal-glow'), 620);
+}
+
+function markUnitDying(unit) {
+  const el = unitEl(unit);
+  if (!el) return;
+  el.classList.add('dying');
+}
+
+function unitEl(u) {
+  return document.querySelector(`[data-uid="${u.side}-${u.slot}"]`);
+}
+
+// Spawn a class-specific FX div on the target's unit card.
+function spawnAttackFX(target, fxClass, variant) {
+  const el = unitEl(target);
+  if (!el) return;
+  let layer = el.querySelector('.fx-layer');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.className = 'fx-layer';
+    el.appendChild(layer);
+  }
+  const mk = (cls) => {
+    const d = document.createElement('div');
+    d.className = 'fx ' + cls;
+    layer.appendChild(d);
+    setTimeout(() => d.remove(), 1000);
+    return d;
+  };
+  if (fxClass === 'knight') {
+    mk('fx-shield-ring');
+  } else if (fxClass === 'mage') {
+    mk('fx-mage-wave ' + (variant || 'arcane'));
+  } else if (fxClass === 'rogue') {
+    mk('fx-smoke');
+    mk('fx-slash');
+  } else if (fxClass === 'healer') {
+    // Spawn 5 sparkles at random x positions
+    for (let i = 0; i < 5; i++) {
+      const s = mk('fx-sparkle');
+      s.style.left = (30 + Math.random() * 40) + '%';
+      s.style.bottom = (10 + Math.random() * 20) + 'px';
+      s.style.animationDelay = (i * 60) + 'ms';
+    }
+  }
 }
 
 function onBattleEnd() {
@@ -483,23 +622,35 @@ function onBattleEnd() {
     setLog('Defeat. Strengthen your team and try again.');
   }
   saveState();
+  showBattleEndscreen(battle.victory, reward);
+}
+
+// Full-screen victory/defeat sequence with tinted overlay, banner, reward, continue btn.
+function showBattleEndscreen(victory, reward) {
   const arena = document.getElementById('battleArena');
-  if (arena) {
-    const resultDiv = document.createElement('div');
-    resultDiv.className = `battle-result ${battle.victory ? 'victory' : 'defeat'}`;
-    const resText = document.createElement('div');
-    resText.textContent = battle.victory ? 'VICTORY' : 'DEFEAT';
-    resultDiv.appendChild(resText);
-    const btnWrap = document.createElement('div');
-    btnWrap.style.marginTop = '8px';
-    const btn = document.createElement('button');
-    btn.className = 'btn btn-primary';
-    btn.textContent = 'Continue';
-    btn.onclick = endBattle;
-    btnWrap.appendChild(btn);
-    resultDiv.appendChild(btnWrap);
-    arena.appendChild(resultDiv);
+  if (!arena) return;
+  const screen = document.createElement('div');
+  screen.className = 'battle-endscreen ' + (victory ? 'victory' : 'defeat');
+
+  const banner = document.createElement('div');
+  banner.className = 'battle-banner ' + (victory ? 'victory' : 'defeat');
+  banner.textContent = victory ? 'VICTORY' : 'DEFEAT';
+  screen.appendChild(banner);
+
+  if (victory && reward > 0) {
+    const rewardEl = document.createElement('div');
+    rewardEl.className = 'battle-reward';
+    rewardEl.textContent = '+' + reward + ' gold';
+    screen.appendChild(rewardEl);
   }
+
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary battle-end-continue';
+  btn.textContent = 'Continue';
+  btn.onclick = endBattle;
+  screen.appendChild(btn);
+
+  arena.appendChild(screen);
 }
 
 // ───────────────────────────────────────────────
@@ -529,18 +680,65 @@ function renderBattle(activeUnit) {
   if (!battle) return;
   const arena = document.getElementById('battleArena');
   const title = battle.kind === 'stage' ? battle.payload.name : `Tower — Floor ${battle.payload.floor}`;
+  // Preserve any existing log message across re-renders
+  const prevLog = (document.getElementById('battleLog') || {}).textContent || '';
   setHTML(arena, `
     <div style="text-align:center;font-family:'Courier New',monospace;font-size:.85rem;color:var(--text-muted)">${title}</div>
+    <div class="turn-order" id="turnOrder"></div>
     <div class="battle-side" id="enemySide">${battle.enemies.map(u => unitHTML(u, activeUnit)).join('')}</div>
     <div class="battle-divider">— vs —</div>
     <div class="battle-side" id="allySide">${battle.allies.map(u => unitHTML(u, activeUnit)).join('')}</div>
+    <div class="battle-log" id="battleLog">${prevLog}</div>
   `);
+  renderTurnOrder(activeUnit);
+}
+
+// Render the next ~5 upcoming actors as small round pips.
+function renderTurnOrder(activeUnit) {
+  const el = document.getElementById('turnOrder');
+  if (!el) return;
+  const alive = [...battle.allies, ...battle.enemies].filter(u => u.hp > 0);
+  if (alive.length === 0) return;
+  // Simulate upcoming turns without mutating state.
+  const sim = alive.map(u => ({ u, nextAct: u.nextAct }));
+  const upcoming = [];
+  for (let i = 0; i < 6 && sim.length > 0; i++) {
+    sim.sort((a, b) => a.nextAct - b.nextAct);
+    const pick = sim[0];
+    upcoming.push(pick.u);
+    pick.nextAct += 100 / pick.u.spd;
+  }
+  while (el.firstChild) el.removeChild(el.firstChild);
+  const label = document.createElement('div');
+  label.className = 'turn-order-label';
+  label.textContent = 'Next';
+  el.appendChild(label);
+  upcoming.forEach((u, idx) => {
+    const pip = document.createElement('div');
+    pip.className = 'turn-pip ' + u.side + (idx === 0 && activeUnit === u ? ' current' : '');
+    // Inline an icon
+    const hero = u.side === 'ally' ? HEROES.find(h => h.name === u.name) : null;
+    const slug = hero ? HERO_ICONS[hero.id] : (u.iconSlug || '');
+    const tint = hero ? `tint-${hero.rarity}` : (u.iconTint || 'tint-A');
+    pip.innerHTML = iconHTML(slug, tint, 18);
+    el.appendChild(pip);
+  });
+}
+
+function logAction(msg) {
+  const el = document.getElementById('battleLog');
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove('fresh');
+  void el.offsetWidth;
+  el.classList.add('fresh');
 }
 
 function unitHTML(u, activeUnit) {
   const pct = Math.max(0, Math.round((u.hp / u.maxHp) * 100));
   const dead = u.hp <= 0 ? ' dead' : '';
   const active = (activeUnit && u === activeUnit) ? ' active' : '';
+  const critical = pct > 0 && pct < 25 ? ' critical' : '';
   const lowClass = pct < 30 ? ' low' : '';
   // For allies, look up hero icon by id; for enemies use the rolled iconSlug/iconTint.
   let portraitHTML;
@@ -555,7 +753,7 @@ function unitHTML(u, activeUnit) {
     <div class="battle-unit${dead}${active}" data-uid="${u.side}-${u.slot}">
       <div class="portrait">${portraitHTML}</div>
       <div class="name">${u.name}</div>
-      <div class="hp-bar"><div class="hp-fill${lowClass}" style="width:${pct}%"></div></div>
+      <div class="hp-bar"><div class="hp-fill${lowClass}${critical}" style="width:${pct}%"></div></div>
       <div class="hp-text">${u.hp}/${u.maxHp}</div>
     </div>
   `;
@@ -704,26 +902,175 @@ function renderSummon() {
 function handlePull(count) {
   const results = doPull(count);
   if (!results) { setLog('Not enough gold.'); return; }
-  const resultsHTML = `
-    <h3 style="margin-top:20px">Results</h3>
-    <div class="summon-results">
-      ${results.map(r => {
-        const tag = r.isNew
-          ? '<div style="font-size:.65rem;color:var(--accent);font-family:monospace">NEW</div>'
-          : '<div style="font-size:.65rem;color:var(--text-muted);font-family:monospace">+1 shard</div>';
-        return `<div class="hero-card rarity-${r.hero.rarity}">
-          ${heroPortrait(r.hero, 48)}
-          <div class="hero-name">${r.hero.name}</div>
-          <div class="hero-stars rarity-${r.hero.rarity}">${'★'.repeat(RARITY[r.hero.rarity].stars)}</div>
-          ${tag}
-        </div>`;
-      }).join('')}
-    </div>
-  `;
   setLog(`Summoned ${count} hero${count > 1 ? 'es' : ''}.`);
   updateHeader();
-  renderSummon();
-  setHTML(document.getElementById('summonResults'), resultsHTML);
+  startPullReveal(results);
+}
+
+// ───────────────────────────────────────────────
+// Pull reveal (slot-machine style)
+// ───────────────────────────────────────────────
+
+// Timing per rarity (ms)
+const REVEAL_TIMING = {
+  common: { roll: 700,  hold: 300 },
+  rare:   { roll: 900,  hold: 800 },
+  epic:   { roll: 1400, hold: 1600 },
+};
+
+let pullRevealTimers = [];
+let pullRevealSkipped = false;
+
+function startPullReveal(results) {
+  pullRevealTimers.forEach(clearTimeout);
+  pullRevealTimers = [];
+  pullRevealSkipped = false;
+
+  const overlay = document.getElementById('pullOverlay');
+  const grid = document.getElementById('pullGrid');
+  grid.className = 'pull-grid count-' + (results.length === 10 ? 10 : 1);
+  while (grid.firstChild) grid.removeChild(grid.firstChild);
+  overlay.classList.add('active');
+
+  // Build empty slots up front
+  results.forEach((_, i) => {
+    const slot = document.createElement('div');
+    slot.className = 'pull-slot';
+    slot.dataset.idx = i;
+    grid.appendChild(slot);
+  });
+
+  // Skip button wired every pull
+  document.getElementById('pullSkipBtn').onclick = () => skipPullReveal(results);
+
+  // Sequential reveals — each card rolls, snaps, then next starts.
+  // Commons have short roll; Rare/Epic have longer roll + flash.
+  let startDelay = 200;
+  results.forEach((r, i) => {
+    const rarity = r.hero.rarity;
+    const tmg = REVEAL_TIMING[rarity];
+    pullRevealTimers.push(setTimeout(() => {
+      if (pullRevealSkipped) return;
+      rollSlot(i, r, tmg);
+    }, startDelay));
+    startDelay += tmg.roll + tmg.hold;
+  });
+  // Show close button after the last card settles
+  schedulePullCloseAfter(startDelay);
+}
+
+// Start the rolling animation on a slot, then snap to the actual result.
+function rollSlot(idx, result, tmg) {
+  const slot = document.querySelector(`.pull-slot[data-idx="${idx}"]`);
+  if (!slot) return;
+
+  // Rolling phase: cycle random hero silhouettes (all in gray tint)
+  slot.classList.add('rolling');
+  let rollStep = 0;
+  const rollInterval = setInterval(() => {
+    if (pullRevealSkipped) { clearInterval(rollInterval); return; }
+    const rnd = HEROES[Math.floor(Math.random() * HEROES.length)];
+    while (slot.firstChild) slot.removeChild(slot.firstChild);
+    const portrait = document.createElement('div');
+    portrait.innerHTML = iconHTML(HERO_ICONS[rnd.id], 'tint-basic', 56);
+    slot.appendChild(portrait);
+    rollStep++;
+  }, 70);
+
+  // After roll duration, stop and reveal
+  pullRevealTimers.push(setTimeout(() => {
+    clearInterval(rollInterval);
+    if (pullRevealSkipped) return;
+    revealSlot(idx, result);
+  }, tmg.roll));
+}
+
+function revealSlot(idx, result) {
+  const slot = document.querySelector(`.pull-slot[data-idx="${idx}"]`);
+  if (!slot) return;
+  const hero = result.hero;
+  slot.classList.remove('rolling');
+  slot.classList.add('revealed');
+  if (hero.rarity === 'rare') slot.classList.add('reveal-rare');
+  if (hero.rarity === 'epic') {
+    slot.classList.add('reveal-epic');
+    spawnEpicScreenFlash();
+  }
+
+  // Clear and render the actual hero card
+  while (slot.firstChild) slot.removeChild(slot.firstChild);
+  if (result.isNew) {
+    const ribbon = document.createElement('div');
+    ribbon.className = 'pull-new-ribbon';
+    ribbon.textContent = 'NEW';
+    slot.appendChild(ribbon);
+  }
+  const portrait = document.createElement('div');
+  portrait.innerHTML = iconHTML(HERO_ICONS[hero.id], `tint-${hero.rarity}`, 64);
+  slot.appendChild(portrait);
+
+  const name = document.createElement('div');
+  name.className = 'hero-name';
+  name.textContent = hero.name;
+  slot.appendChild(name);
+
+  const cls = document.createElement('div');
+  cls.className = 'hero-class';
+  cls.textContent = hero.class;
+  slot.appendChild(cls);
+
+  const stars = document.createElement('div');
+  stars.className = 'hero-stars rarity-' + hero.rarity;
+  stars.textContent = '★'.repeat(RARITY[hero.rarity].stars);
+  slot.appendChild(stars);
+
+  if (!result.isNew) {
+    const shard = document.createElement('div');
+    shard.className = 'pull-shard-note';
+    shard.textContent = '+1 shard';
+    slot.appendChild(shard);
+  }
+}
+
+function spawnEpicScreenFlash() {
+  const flash = document.createElement('div');
+  flash.className = 'epic-screen-flash';
+  document.body.appendChild(flash);
+  setTimeout(() => flash.remove(), 900);
+}
+
+// Skip: instantly reveal all remaining slots, stop timers, show close button.
+function skipPullReveal(results) {
+  pullRevealSkipped = true;
+  pullRevealTimers.forEach(clearTimeout);
+  pullRevealTimers = [];
+  results.forEach((r, i) => {
+    const slot = document.querySelector(`.pull-slot[data-idx="${i}"]`);
+    if (!slot || slot.classList.contains('revealed')) return;
+    revealSlot(i, r);
+  });
+  showPullCloseButton();
+}
+
+function showPullCloseButton() {
+  const header = document.querySelector('.pull-header');
+  if (header.querySelector('.pull-close')) return;
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'pull-skip pull-close';
+  closeBtn.textContent = 'Close';
+  closeBtn.onclick = () => {
+    document.getElementById('pullOverlay').classList.remove('active');
+    closeBtn.remove();
+    renderSummon();
+  };
+  header.appendChild(closeBtn);
+}
+
+// When the last card reveals, auto-show the close button.
+function schedulePullCloseAfter(totalMs) {
+  pullRevealTimers.push(setTimeout(() => {
+    if (!pullRevealSkipped) showPullCloseButton();
+  }, totalMs + 400));
 }
 
 function renderCampaign() {

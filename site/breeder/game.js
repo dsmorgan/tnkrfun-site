@@ -9,7 +9,7 @@ const $ = id => document.getElementById(id);
 
 /* ── Game Balance Constants ─────────────────── */
 const LICENSE_COST = 200;
-const LICENSE_DURATION = 15;
+const LICENSE_DURATION = 30;
 const MAX_CARE_PER_DAY = 2;
 
 /* ── Utility ─────────────────────────────────── */
@@ -206,6 +206,102 @@ function generateName() {
   return pick(NAME_PREFIXES) + pick(NAME_SUFFIXES);
 }
 
+/* ── Rarity helpers ──────────────────────────── */
+
+// Roll a rarity tier. `biomeBoost` is an optional flat additive to rare+epic odds,
+// derived from biome.rareChance. Wild capture uses this; market/starter do not.
+function rollRarity(biomeBoost) {
+  const boost = (biomeBoost || 0) * 100; // e.g. 0.18 → 18
+  // Split boost 80/20 between rare and epic proportional to their base weights
+  const epicW = RARITY.epic.odds + boost * 0.15;
+  const rareW = RARITY.rare.odds + boost * 0.85;
+  const commW = Math.max(0, 100 - epicW - rareW);
+  const r = Math.random() * (epicW + rareW + commW);
+  if (r < epicW) return 'epic';
+  if (r < epicW + rareW) return 'rare';
+  return 'common';
+}
+
+function rarityMult(tier) { return (RARITY[tier] || RARITY.common).statMult; }
+function rarityPriceMult(tier) { return (RARITY[tier] || RARITY.common).priceMult; }
+
+// Apply rarity stat multiplier in place.
+function applyRarityToStats(horse) {
+  const mult = rarityMult(horse.rarity);
+  if (mult === 1) return;
+  for (const k of Object.keys(horse.stats)) horse.stats[k] = Math.round(horse.stats[k] * mult);
+  for (const k of Object.keys(horse.talents)) horse.talents[k] = Math.round(horse.talents[k] * mult);
+}
+
+function rollEliteTrait() {
+  const keys = Object.keys(ELITE_TRAITS);
+  return keys[Math.floor(Math.random() * keys.length)];
+}
+
+// Breeding inheritance roll. Inbreeding penalty: parents sharing a grandparent
+// bump rarity odds down one tier.
+function rollBreedingRarity(parentA, parentB) {
+  const a = parentA.rarity || 'common';
+  const b = parentB.rarity || 'common';
+  const pair = [a, b].sort().join('-');
+  let table = BREEDING_RARITY_TABLE[pair] || BREEDING_RARITY_TABLE['common-common'];
+  // Blessed Bloodline: if either parent has it, bump outcome one tier up weight.
+  const aBless = (parentA.eliteTrait === 'blessedBloodline');
+  const bBless = (parentB.eliteTrait === 'blessedBloodline');
+  // Inbreeding: shared grandparent drops tiers one step.
+  const shared = parentA.parentA && parentB.parentA &&
+    (parentA.parentA === parentB.parentA || parentA.parentA === parentB.parentB ||
+     parentA.parentB === parentB.parentA || parentA.parentB === parentB.parentB);
+  let { common: c, rare: r, epic: e } = table;
+  if (shared) { c += r + e; r = 0; e = 0; c = Math.min(100, c); /* collapse to common */ }
+  if (aBless || bBless) { const shift = 8; c = Math.max(0, c - shift); r = Math.max(0, r - Math.floor(shift/2)); e += shift + Math.floor(shift/2); }
+  const total = c + r + e || 1;
+  const roll = Math.random() * total;
+  if (roll < e) return 'epic';
+  if (roll < e + r) return 'rare';
+  return 'common';
+}
+
+function hasAdvancedLicense() {
+  return !!(state.upgrades && state.upgrades.advancedLicense);
+}
+
+// Limit a horse's visible trait pills by rarity cap.
+// Trait pills are derived from talents; the cap affects how many we *display*
+// in the expanded detail view.
+function traitCapFor(horse) {
+  return (RARITY[horse.rarity] || RARITY.common).traitCap;
+}
+
+// Append a styled sex pill onto a parent element, plus optional surrounding text.
+// Callers that currently use `.textContent = 'X • mare • Y'` should instead
+// clear textContent and call appendSexLine(el, [before], horse, [after]).
+function makeSexBadge(sex) {
+  const span = document.createElement('span');
+  span.className = 'sex-badge sex-' + sex;
+  span.textContent = (sex === 'stallion' ? '\u2642 ' : '\u2640 ') + sex;
+  return span;
+}
+
+// Rarity pill (Rare / Epic only — Common returns null).
+function makeRarityBadge(rarity) {
+  if (!rarity || rarity === 'common') return null;
+  const span = document.createElement('span');
+  span.className = 'rarity-pill rarity-' + rarity;
+  span.textContent = '\u2605'.repeat(RARITY[rarity].stars) + ' ' + RARITY[rarity].label;
+  return span;
+}
+
+// Append sex badge + optional rarity badge to a container with spacing.
+function appendBadges(container, horse) {
+  container.appendChild(makeSexBadge(horse.sex));
+  const rb = makeRarityBadge(horse.rarity);
+  if (rb) {
+    container.appendChild(document.createTextNode(' '));
+    container.appendChild(rb);
+  }
+}
+
 function generateFaceMarking() {
   const r = Math.random();
   if (r < 0.3) return 'none';
@@ -217,7 +313,9 @@ function generateFaceMarking() {
 }
 
 /* ── Create Horse ────────────────────────────── */
-function createWildHorse(breedKey) {
+// Opts: { rarity: 'common' | 'rare' | 'epic', forceStarter: boolean }
+function createWildHorse(breedKey, opts) {
+  opts = opts || {};
   const genotype = generateGenotype(breedKey);
   const stats = generateStats(breedKey);
   const talents = generateTalents(breedKey);
@@ -232,7 +330,7 @@ function createWildHorse(breedKey) {
 
   const finalCoat = coat.isLethalWhite ? resolveCoatColor(genotype, age) : coat;
 
-  return {
+  const horse = {
     id: uid(),
     name: generateName(),
     breed: breedKey,
@@ -253,7 +351,12 @@ function createWildHorse(breedKey) {
     trainStreak: 0,
     sex: Math.random() < 0.5 ? 'mare' : 'stallion',
     maxAge: randRange(25, 30),
+    rarity: opts.rarity || 'common',
+    eliteTrait: null,
   };
+  applyRarityToStats(horse);
+  if (horse.rarity === 'epic') horse.eliteTrait = rollEliteTrait();
+  return horse;
 }
 
 /* ── SVG Horse Renderer ──────────────────────── */
@@ -417,8 +520,17 @@ function loadState() {
       state.stable.forEach(h => {
         if (!h.maxAge) h.maxAge = randRange(25, 30);
         if (h.careToday === undefined) h.careToday = 0;
+        if (!h.rarity) h.rarity = 'common';
+        if (h.eliteTrait === undefined) h.eliteTrait = null;
         h.coat = resolveCoatColor(h.genotype, h.age);
       });
+      // Migrate nursery entries to include parent rarity for foal inheritance.
+      if (Array.isArray(state.nursery)) {
+        state.nursery.forEach(n => {
+          if (n.parentAData && !n.parentAData.rarity) n.parentAData.rarity = 'common';
+          if (n.parentBData && !n.parentBData.rarity) n.parentBData.rarity = 'common';
+        });
+      }
       // Normalize retired horse records to summary shape
       state.retired = state.retired.map(toRetiredSummary);
       return true;
@@ -736,7 +848,9 @@ function showForceRelease(excess) {
     info.appendChild(nameLine);
     const detailLine = document.createElement('div');
     detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
-    detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Age ' + horse.age;
+    detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ';
+    appendBadges(detailLine, horse);
+    detailLine.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age)));
     info.appendChild(detailLine);
     card.appendChild(info);
 
@@ -854,7 +968,19 @@ function breedHorse(parentAId, parentBId, parentAData, parentBData) {
     breedLabel = BREEDS[parentA.breed].name + '-' + BREEDS[parentB.breed].name + ' Cross';
   }
 
-  return {
+  // Roll foal rarity from parent tiers (with inbreeding/blessing modifiers).
+  const foalRarity = rollBreedingRarity(parentA, parentB);
+
+  // "Graceful" elite trait doubles trait inheritance variance (stronger stats).
+  const hasGraceful = parentA.eliteTrait === 'graceful' || parentB.eliteTrait === 'graceful';
+  if (hasGraceful) {
+    for (const key of Object.keys(STAT_DEFS)) {
+      talents[key] = clamp(Math.round(talents[key] * 1.10), 20, 100);
+      stats[key]   = clamp(Math.round(stats[key]   * 1.10), 5,  50);
+    }
+  }
+
+  const foal = {
     id: uid(),
     name: generateName(),
     breed: breedKey,
@@ -862,6 +988,8 @@ function breedHorse(parentAId, parentBId, parentAData, parentBData) {
     generation: Math.max(parentA.generation, parentB.generation) + 1,
     parentA: parentA.id,
     parentB: parentB.id,
+    parentAName: parentA.name || null,
+    parentBName: parentB.name || null,
     genotype,
     coat,
     faceMarking: generateFaceMarking(),
@@ -875,7 +1003,12 @@ function breedHorse(parentAId, parentBId, parentAData, parentBData) {
     trainStreak: 0,
     sex: Math.random() < 0.5 ? 'mare' : 'stallion',
     maxAge: randRange(25, 30),
+    rarity: foalRarity,
+    eliteTrait: null,
   };
+  applyRarityToStats(foal);
+  if (foal.rarity === 'epic') foal.eliteTrait = rollEliteTrait();
+  return foal;
 }
 
 /* ── UI Rendering ────────────────────────────── */
@@ -884,7 +1017,21 @@ function renderAll() {
   renderHeader();
   renderStable();
   renderFooter();
-  // Other tabs rendered on switch
+  // Re-render whatever tab is currently active so values (like license days
+  // remaining) stay fresh after endDay without a tab click.
+  const activeTabBtn = document.querySelector('.tab-btn.active');
+  if (activeTabBtn) {
+    const tabId = activeTabBtn.dataset.tab;
+    switch (tabId) {
+      case 'breed':    renderBreedTab(); break;
+      case 'train':    renderTrainTab(); break;
+      case 'care':     renderCareTab(); break;
+      case 'explore':  renderExploreTab(); break;
+      case 'market':   renderMarketTab(); break;
+      case 'upgrades': renderUpgradesTab(); break;
+      // 'stable' already handled by renderStable() above
+    }
+  }
 }
 
 function renderHeader() {
@@ -892,6 +1039,17 @@ function renderHeader() {
   $('moneyDisplay').textContent = state.money;
   $('repDisplay').textContent = state.reputation;
   $('repFill').style.width = Math.min(100, state.reputation / 6) + '%'; // 600 = 100%
+  // Rep title tiers
+  const rep = state.reputation;
+  let title = 'Hand', tier = 1;
+  if (rep >= 600)      { title = 'Legend';  tier = 4; }
+  else if (rep >= 300) { title = 'Master';  tier = 3; }
+  else if (rep >= 100) { title = 'Breeder'; tier = 2; }
+  const titleEl = $('repTitle');
+  if (titleEl) {
+    titleEl.textContent = title;
+    titleEl.className = 'rep-title tier-' + tier;
+  }
   $('energyDisplay').textContent = state.energy + '/' + (state.maxEnergy + state.upgrades.energyBoost);
 }
 
@@ -938,9 +1096,17 @@ function renderStable() {
 
 function createHorseCard(horse) {
   const card = document.createElement('div');
-  card.className = 'horse-card';
+  card.className = 'horse-card rarity-' + (horse.rarity || 'common');
   card.style.borderLeftColor = horse.coat.bodyHex;
   card.dataset.horseId = horse.id;
+
+  // Rarity stars badge (top-right corner)
+  if (horse.rarity && horse.rarity !== 'common') {
+    const stars = document.createElement('div');
+    stars.className = 'rarity-badge rarity-' + horse.rarity;
+    stars.textContent = '★'.repeat(RARITY[horse.rarity].stars);
+    card.appendChild(stars);
+  }
 
   // Portrait
   const portrait = document.createElement('div');
@@ -959,7 +1125,9 @@ function createHorseCard(horse) {
 
   const breedRow = document.createElement('div');
   breedRow.className = 'horse-breed';
-  breedRow.textContent = horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Gen ' + horse.generation;
+  breedRow.textContent = horse.breedLabel + ' \u2022 ';
+  appendBadges(breedRow, horse);
+  breedRow.appendChild(document.createTextNode(' \u2022 Gen ' + horse.generation));
   info.appendChild(breedRow);
 
   const coatRow = document.createElement('div');
@@ -1043,13 +1211,45 @@ function toggleHorseDetail(card, horse) {
   const detail = document.createElement('div');
   detail.className = 'horse-detail';
 
-  // Lineage
+  // Rarity label (Rare/Epic only)
+  if (horse.rarity && horse.rarity !== 'common') {
+    const rarityRow = document.createElement('div');
+    rarityRow.className = 'rarity-row rarity-' + horse.rarity;
+    rarityRow.textContent = '★'.repeat(RARITY[horse.rarity].stars) + '  ' + RARITY[horse.rarity].label;
+    detail.appendChild(rarityRow);
+  }
+  // Elite trait pill (Epic only)
+  if (horse.eliteTrait && ELITE_TRAITS[horse.eliteTrait]) {
+    const elite = ELITE_TRAITS[horse.eliteTrait];
+    const eliteRow = document.createElement('div');
+    eliteRow.className = 'elite-trait';
+    const nameEl = document.createElement('strong');
+    nameEl.textContent = elite.name;
+    const descEl = document.createElement('span');
+    descEl.textContent = ' — ' + elite.desc;
+    eliteRow.appendChild(nameEl);
+    eliteRow.appendChild(descEl);
+    detail.appendChild(eliteRow);
+  }
+
+  // Lineage: show parent names, de-emphasized if no longer in the stable.
   if (horse.parentA || horse.parentB) {
     const lin = document.createElement('div');
     lin.className = 'lineage';
     const pA = horse.parentA ? state.stable.find(h => h.id === horse.parentA) : null;
     const pB = horse.parentB ? state.stable.find(h => h.id === horse.parentB) : null;
-    lin.textContent = 'Parents: ' + (pA ? pA.name : 'Unknown') + ' x ' + (pB ? pB.name : 'Unknown');
+    const nameA = pA ? pA.name : (horse.parentAName || null);
+    const nameB = pB ? pB.name : (horse.parentBName || null);
+    lin.appendChild(document.createTextNode('Parents: '));
+    const addName = (name, alive) => {
+      const span = document.createElement('span');
+      span.textContent = name || 'Unknown';
+      if (!alive) span.className = 'lineage-gone';
+      lin.appendChild(span);
+    };
+    addName(nameA, !!pA);
+    lin.appendChild(document.createTextNode(' x '));
+    addName(nameB, !!pB);
     detail.appendChild(lin);
   } else {
     const lin = document.createElement('div');
@@ -1406,7 +1606,7 @@ function createBreedSlot(label, horseId) {
       const portrait = document.createElement('div');
       portrait.className = 'horse-portrait';
       portrait.style.cssText = 'width:64px;height:64px;background:' + portraitBg(horse.coat.bodyHex);
-      portrait.querySelector || portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
+      portrait.insertAdjacentHTML('beforeend', renderHorseSVG(horse));
       slot.appendChild(portrait);
 
       const name = document.createElement('div');
@@ -1416,7 +1616,8 @@ function createBreedSlot(label, horseId) {
 
       const info = document.createElement('div');
       info.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
-      info.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex;
+      info.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ';
+      appendBadges(info, horse);
       slot.appendChild(info);
 
       const btnRow = document.createElement('div');
@@ -1510,7 +1711,9 @@ function openHorsePicker(slotLabel) {
 
     const details = document.createElement('div');
     details.style.cssText = 'font-size:.75rem;color:var(--text-muted)';
-    details.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Age ' + horse.age;
+    details.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ';
+    appendBadges(details, horse);
+    details.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age)));
     info.appendChild(details);
 
     card.appendChild(portrait);
@@ -1542,6 +1745,15 @@ function startBreeding(parentA, parentB) {
   if (state.nursery.length >= getNurseryCap()) return;
   if (state.stable.length >= getStableCap()) return;
 
+  // Advanced license gate: Rare or Epic parents require the license.
+  const needsAdvanced = (parentA.rarity && parentA.rarity !== 'common') ||
+                        (parentB.rarity && parentB.rarity !== 'common');
+  if (needsAdvanced && !hasAdvancedLicense()) {
+    state.eventLog = 'Breeding Rare or Epic horses requires the Advanced Breeding License (Upgrades tab).';
+    renderFooter();
+    return;
+  }
+
   state.energy--;
 
   // Add to nursery — snapshot parent data so foal can be born even if parents retire/sell
@@ -1551,8 +1763,8 @@ function startBreeding(parentA, parentB) {
     parentAName: parentA.name,
     parentBName: parentB.name,
     daysLeft: 5,
-    parentAData: { id: parentA.id, genotype: parentA.genotype, talents: parentA.talents, breed: parentA.breed, breedLabel: parentA.breedLabel, generation: parentA.generation },
-    parentBData: { id: parentB.id, genotype: parentB.genotype, talents: parentB.talents, breed: parentB.breed, breedLabel: parentB.breedLabel, generation: parentB.generation },
+    parentAData: { id: parentA.id, name: parentA.name, genotype: parentA.genotype, talents: parentA.talents, breed: parentA.breed, breedLabel: parentA.breedLabel, generation: parentA.generation, rarity: parentA.rarity || 'common', eliteTrait: parentA.eliteTrait || null, parentA: parentA.parentA || null, parentB: parentA.parentB || null },
+    parentBData: { id: parentB.id, name: parentB.name, genotype: parentB.genotype, talents: parentB.talents, breed: parentB.breed, breedLabel: parentB.breedLabel, generation: parentB.generation, rarity: parentB.rarity || 'common', eliteTrait: parentB.eliteTrait || null, parentA: parentB.parentA || null, parentB: parentB.parentB || null },
   });
 
   // Set cooldowns
@@ -1666,7 +1878,8 @@ function renderTrainTab() {
       info.appendChild(nameLine);
       const detailLine = document.createElement('div');
       detailLine.style.cssText = 'font-size:.65rem;color:var(--text-muted)';
-      detailLine.textContent = horse.breedLabel + ' \u2022 ' + horse.sex;
+      detailLine.textContent = horse.breedLabel + ' \u2022 ';
+      appendBadges(detailLine, horse);
       info.appendChild(detailLine);
       card.appendChild(info);
 
@@ -1968,12 +2181,15 @@ function renderCompetitions(container, horse) {
 }
 
 function computeEventScore(horse, evt) {
+  // Apply elite trait stat boosts locally.
+  const effSpeed   = horse.stats.speed   * (horse.eliteTrait === 'lightningBolt' ? 1.15 : 1.0);
+  const effStamina = horse.stats.stamina * (horse.eliteTrait === 'ironWill'       ? 1.20 : 1.0);
+  const effStats = { ...horse.stats, speed: effSpeed, stamina: effStamina };
   if (!evt.primary) {
-    // Grand Prix: average all stats
-    const total = Object.values(horse.stats).reduce((s, v) => s + v, 0);
+    const total = Object.values(effStats).reduce((s, v) => s + v, 0);
     return Math.round(total / Object.keys(STAT_DEFS).length);
   }
-  return Math.round(horse.stats[evt.primary] * 0.7 + horse.stats[evt.secondary] * 0.3);
+  return Math.round(effStats[evt.primary] * 0.7 + effStats[evt.secondary] * 0.3);
 }
 
 function doCompetition(horse, eventKey, evt) {
@@ -2360,6 +2576,8 @@ function getStableCap() {
 }
 
 function hasValidLicense() {
+  // Master license is permanent and satisfies the check forever.
+  if (hasAdvancedLicense()) return true;
   return state.upgrades.breedLicense && state.upgrades.breedLicense > state.day;
 }
 
@@ -2531,10 +2749,14 @@ function doExplore(biomeKey) {
   } else {
     // Pick a breed from this biome
     const breedKey = pick(biome.breeds);
-    const horse = createWildHorse(breedKey);
+    // Roll rarity tier using biome rareChance as a boost.
+    const boost = biome.rareChance + (hasActiveEvent('rareBoost') ? 0.15 : 0);
+    const tier = rollRarity(boost);
+    const horse = createWildHorse(breedKey, { rarity: tier });
 
-    // Rare variant?
-    const rareChance = biome.rareChance + (hasActiveEvent('rareBoost') ? 0.15 : 0);
+    // Rare-coat variant: weighted by rarity tier (Epic ×3, Rare ×2, Common ×1).
+    const coatWeight = RARITY[tier].coatWeight;
+    const rareChance = Math.min(0.95, biome.rareChance * coatWeight + (hasActiveEvent('rareBoost') ? 0.15 : 0));
     if (Math.random() < rareChance) {
       // Give this horse an unusual allele combo — force a dilution or pattern
       const rareTrait = pick(['cream', 'dun', 'tobiano', 'roan', 'grey']);
@@ -2578,7 +2800,9 @@ function renderEncounter(panel, encounter) {
 
   const breedLine = document.createElement('div');
   breedLine.style.cssText = 'color:var(--text-muted);margin-bottom:4px';
-  breedLine.textContent = horse.breedLabel + ' \u2022 ' + horse.sex + ' \u2022 Age ' + horse.age + 'yr';
+  breedLine.textContent = horse.breedLabel + ' \u2022 ';
+  appendBadges(breedLine, horse);
+  breedLine.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age) + 'yr'));
   details.appendChild(breedLine);
 
   // Show top stats as pills
@@ -2777,7 +3001,10 @@ function matchBuyer(horse, buyer) {
   if (matched === 0) return null; // can't sell if no matches at all
 
   const multiplier = matched === total ? 1.5 : matched / total;
-  const price = Math.round(buyer.basePrice * multiplier);
+  // Rarity price multiplier and Golden Hoof elite trait bonus.
+  const rarityFactor = rarityPriceMult(horse.rarity);
+  const goldenHoof = horse.eliteTrait === 'goldenHoof' ? 1.25 : 1.0;
+  const price = Math.round(buyer.basePrice * multiplier * rarityFactor * goldenHoof);
 
   return { matched, total, price, details };
 }
@@ -2913,7 +3140,8 @@ function renderMatchingHorses(container, buyer) {
 
       const detailLine = document.createElement('div');
       detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
-      detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ' + horse.sex;
+      detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ';
+      appendBadges(detailLine, horse);
       info.appendChild(detailLine);
 
       // Match details
@@ -3103,14 +3331,19 @@ function renderUpgradesTab() {
         nameEl.className = 'upgrade-name';
         nameEl.textContent = upg.name;
         const daysLeft = licenseDaysLeft();
-        if (daysLeft > 0) nameEl.textContent += ' \u2713';
+        const superseded = hasAdvancedLicense();
+        if (superseded || daysLeft > 0) {
+          nameEl.textContent += ' \u2713';
+          item.classList.add('owned');
+        }
         info.appendChild(nameEl);
 
         const descEl = document.createElement('div');
         descEl.className = 'upgrade-desc';
-        if (daysLeft > 5) {
+        if (superseded) {
+          descEl.textContent = 'Covered by Master License';
+        } else if (daysLeft > 5) {
           descEl.textContent = 'Active \u2014 expires in ' + daysLeft + ' days';
-          descEl.style.color = 'var(--accent)';
         } else if (daysLeft > 0) {
           descEl.textContent = 'Expiring soon! ' + daysLeft + ' day' + (daysLeft !== 1 ? 's' : '') + ' left';
           descEl.style.color = 'var(--gold)';
@@ -3126,7 +3359,8 @@ function renderUpgradesTab() {
         const needsRenew = daysLeft <= 5;
         const cost = LICENSE_COST;
         const canAfford = state.money >= cost;
-        if (needsRenew || !state.upgrades.breedLicense) {
+        // Hide buy/renew button entirely if Master already covers it.
+        if (!superseded && (needsRenew || !state.upgrades.breedLicense)) {
           const buyBtn = document.createElement('button');
           buyBtn.className = canAfford ? 'btn btn-gold' : 'btn btn-muted';
           buyBtn.style.cssText = 'font-size:.75rem;padding:4px 10px;white-space:nowrap';
@@ -3161,7 +3395,8 @@ function renderUpgradesTab() {
       const descEl = document.createElement('div');
       descEl.className = 'upgrade-desc';
       if (maxed) {
-        descEl.textContent = 'Fully upgraded';
+        // Show the active effect, same pattern as Apprentice License ("Active — …")
+        descEl.textContent = 'Active \u2014 ' + upg.descriptions[upg.descriptions.length - 1];
       } else {
         descEl.textContent = upg.descriptions[currentLevel];
       }

@@ -332,10 +332,38 @@ const UPGRADES = {
   trainingRing:  { name: 'Training Facility',maxLevel: 2, costs: [500, 1200],       category: 'facility',  descriptions: ['Training Barn (+1 stat/session)', 'Pro Facility (+2 stat, talent hints)'] },
   autoFeeder:    { name: 'Auto-Feeder',      maxLevel: 1, costs: [350],             category: 'care',      descriptions: ['Auto basic feed (prevents hunger decay)'] },
   vetOnCall:     { name: 'Vet on Call',       maxLevel: 1, costs: [500],             category: 'care',      descriptions: ['Prevents illness events'] },
-  breedLicense:  { name: 'Breeding License',  maxLevel: 1, costs: [200],             category: 'knowledge', descriptions: ['Legal breeding (no fines)'] },
+  breedLicense:  { name: 'Apprentice Breeding License',  maxLevel: 1, costs: [200],             category: 'knowledge', descriptions: ['Legal breeding of Common horses (30 days)'] },
+  advancedLicense:{ name: 'Master Breeding License', maxLevel: 1, costs: [3500],   category: 'knowledge', descriptions: ['Permanent legal breeding including Rare and Epic horses'] },
   coatGuide:     { name: 'Coat Genetics Guide',maxLevel: 1, costs: [300],            category: 'knowledge', descriptions: ['Shows genotype on horses'] },
   lineageTracker:{ name: 'Lineage Tracker',   maxLevel: 1, costs: [400],             category: 'knowledge', descriptions: ['Shows full ancestry tree'] },
   energyBoost:   { name: 'Ranch Hands',       maxLevel: 2, costs: [400, 800],        category: 'facility',  descriptions: ['4 energy/day', '5 energy/day'] },
+};
+
+/* ── Rarity tiers ────────────────────────────── */
+const RARITY = {
+  common: { label: 'Common', stars: 1, odds: 70, statMult: 1.00, priceMult: 1.0, traitCap: 2, coatWeight: 1 },
+  rare:   { label: 'Rare',   stars: 2, odds: 25, statMult: 1.10, priceMult: 1.8, traitCap: 3, coatWeight: 2 },
+  epic:   { label: 'Epic',   stars: 3, odds:  5, statMult: 1.20, priceMult: 3.5, traitCap: 4, coatWeight: 3 },
+};
+
+/* ── Elite traits (Epic-only, one guaranteed at birth) ── */
+const ELITE_TRAITS = {
+  lightningBolt:    { name: 'Lightning Bolt',    desc: '+15% effective Speed in competitions' },
+  ironWill:         { name: 'Iron Will',         desc: '+20% effective Stamina' },
+  goldenHoof:       { name: 'Golden Hoof',       desc: '+25% sell price' },
+  blessedBloodline: { name: 'Blessed Bloodline', desc: 'Foals inherit rarity as if one tier higher' },
+  graceful:         { name: 'Graceful',          desc: 'Doubles trait inheritance chance to foals' },
+};
+
+/* ── Breeding rarity inheritance table ───────── */
+// Keys use sorted parent tiers (lowest first, e.g. "common-rare").
+const BREEDING_RARITY_TABLE = {
+  'common-common': { common: 90, rare: 10, epic:  0 },
+  'common-rare':   { common: 60, rare: 35, epic:  5 },
+  'common-epic':   { common: 40, rare: 45, epic: 15 },
+  'rare-rare':     { common: 30, rare: 55, epic: 15 },
+  'rare-epic':     { common: 10, rare: 55, epic: 35 },
+  'epic-epic':     { common:  0, rare: 40, epic: 60 },
 };
 
 /* ── Competition Events ──────────────────────── */

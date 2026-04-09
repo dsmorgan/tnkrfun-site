@@ -317,7 +317,7 @@ const CAMPAIGN = [
     stages: [
       { id: '3-1', name: 'Outer Walls',   enemies: [enemy('shadow-guard', 5), enemy('shadow-guard', 5), enemy('shadow-archer', 5), enemy('shadow-archer', 5)] },
       { id: '3-2', name: 'Cursed Halls',  enemies: [enemy('wraith', 6), enemy('wraith', 6), enemy('cult-healer', 5), enemy('shadow-guard', 5)] },
-      { id: '3-3', name: 'Throne Room',   enemies: [enemy('cult-mage', 6), enemy('cult-mage', 6), enemy('shadow-knight', 6), enemy('shadow-archer', 6), enemy('cult-healer', 6)] },
+      { id: '3-3', name: 'Throne Room',   enemies: [enemy('cult-mage', 6), enemy('shadow-knight', 6), enemy('shadow-archer', 6), enemy('cult-healer', 6)] },
       { id: '3-4', name: 'Inner Sanctum', enemies: [enemy('high-priest', 5), enemy('shadow-knight', 7), enemy('wraith', 7), enemy('cult-mage', 6), enemy('wraith', 7)] },
       { id: '3-5', name: 'The Shadow Lord', enemies: [enemy('the-shadow-lord', 6), enemy('shadow-knight', 8), enemy('shadow-knight', 8), enemy('wraith', 8), enemy('cult-healer', 7)] },
     ],

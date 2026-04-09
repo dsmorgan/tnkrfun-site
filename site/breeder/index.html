@@ -45,12 +45,13 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
 
 /* ── Header ──────────────────────────────────── */
 .header{
-  position:sticky;top:0;z-index:100;
+  position:fixed;top:0;left:0;right:0;z-index:100;
   background:var(--bg);
   border-bottom:1px solid var(--border);
   padding:10px 16px;
   display:flex;align-items:center;gap:16px;flex-wrap:wrap;
 }
+body{padding-top:92px} /* compensate for fixed header+tabs */
 .header h1{color:var(--accent);white-space:nowrap}
 .header-stats{
   display:flex;gap:16px;font-size:.85rem;
@@ -69,10 +70,22 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   width:60px;height:8px;background:rgba(255,255,255,.08);
   border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle;
 }
-.rep-bar-fill{height:100%;background:var(--accent);border-radius:4px;transition:width .3s}
+.rep-bar-fill{display:block;height:100%;background:var(--accent);border-radius:4px;transition:width .3s}
+.rep-title{
+  display:inline-block;padding:1px 7px;border-radius:10px;
+  font-family:'Courier New',monospace;font-size:.65rem;font-weight:600;
+  letter-spacing:.04em;text-transform:uppercase;
+  color:var(--text-muted);background:rgba(255,255,255,.05);
+  border:1px solid var(--border);
+  margin-left:4px;
+}
+.rep-title.tier-2{color:#7ec0ff;background:rgba(126,192,255,.1);border-color:rgba(126,192,255,.4)}
+.rep-title.tier-3{color:#ffcc33;background:rgba(255,204,51,.1);border-color:rgba(255,204,51,.4)}
+.rep-title.tier-4{color:#d8a0ff;background:rgba(168,85,247,.12);border-color:rgba(168,85,247,.5)}
 
 /* ── Tabs ────────────────────────────────────── */
 .tabs{
+  position:fixed;top:44px;left:0;right:0;z-index:100;
   display:flex;gap:2px;padding:0 16px;
   background:var(--bg);
   border-bottom:1px solid var(--border);
@@ -132,6 +145,7 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
 }
 .horse-card{
   background:var(--bg-card);
+  border:2px solid #2a2a44;
   border-left:4px solid #888;
   border-radius:var(--radius);
   padding:12px 14px;
@@ -139,12 +153,88 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   grid-template-columns:80px 1fr;
   gap:12px;
   cursor:pointer;
-  transition:background .15s;
+  transition:background .15s,box-shadow .15s;
+  position:relative;
 }
 .horse-card:hover{background:var(--bg-hover)}
 .horse-card.expanded{
   grid-template-columns:1fr;
   cursor:default;
+}
+
+/* ── Rarity tiers (ported from Tinker Impact) ── */
+.horse-card.rarity-common{}
+.horse-card.rarity-rare{
+  border-color:#ffcc33;
+  box-shadow:0 0 14px rgba(255,204,51,.45), inset 0 0 8px rgba(255,204,51,.08);
+}
+.horse-card.rarity-epic{
+  border-color:#a855f7;
+  animation:horseCardPulsePurple 2.2s ease-in-out infinite;
+}
+@keyframes horseCardPulsePurple{
+  0%,100%{box-shadow:0 0 12px rgba(168,85,247,.45), inset 0 0 8px rgba(168,85,247,.1)}
+  50%   {box-shadow:0 0 28px rgba(216,160,255,.95), inset 0 0 16px rgba(216,160,255,.3)}
+}
+
+/* Rarity corner badge */
+.rarity-badge{
+  position:absolute;top:6px;right:8px;
+  font-family:'Courier New',monospace;font-size:.7rem;letter-spacing:1px;
+  pointer-events:none;z-index:2;
+}
+.rarity-badge.rarity-rare{color:#ffcc33;text-shadow:0 0 4px rgba(255,204,51,.8)}
+.rarity-badge.rarity-epic{color:#d8a0ff;text-shadow:0 0 6px rgba(216,160,255,.9)}
+
+/* Rarity label row inside expanded detail */
+.rarity-row{
+  font-family:'Courier New',monospace;font-size:.8rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.1em;
+  padding:3px 8px;border-radius:4px;
+  align-self:flex-start;display:inline-block;
+}
+.rarity-row.rarity-rare{color:#ffcc33;background:rgba(255,204,51,.1);border:1px solid rgba(255,204,51,.4)}
+.rarity-row.rarity-epic{color:#d8a0ff;background:rgba(168,85,247,.12);border:1px solid rgba(168,85,247,.5)}
+
+/* Elite trait pill (Epic-only) */
+.elite-trait{
+  font-family:'Courier New',monospace;font-size:.75rem;
+  padding:6px 10px;border-radius:4px;
+  background:linear-gradient(90deg,rgba(168,85,247,.18),rgba(168,85,247,.05));
+  border:1px solid rgba(168,85,247,.4);
+  color:#e0e8ff;
+}
+.elite-trait strong{color:#d8a0ff;letter-spacing:.04em}
+.lineage-gone{color:var(--text-muted);font-style:italic;opacity:.65;text-decoration:line-through;text-decoration-thickness:1px}
+.sex-badge{
+  display:inline-block;
+  padding:1px 7px;border-radius:10px;
+  font-family:'Courier New',monospace;font-size:.68rem;font-weight:600;
+  letter-spacing:.03em;text-transform:lowercase;
+  vertical-align:baseline;
+}
+.sex-stallion{color:#7ec0ff;background:rgba(126,192,255,.12);border:1px solid rgba(126,192,255,.4)}
+.sex-mare{color:#ff9ec4;background:rgba(255,158,196,.12);border:1px solid rgba(255,158,196,.4)}
+
+/* Rarity pill (matches sex-badge sizing) */
+.rarity-pill{
+  display:inline-block;
+  padding:1px 7px;border-radius:10px;
+  font-family:'Courier New',monospace;font-size:.68rem;font-weight:600;
+  letter-spacing:.03em;
+  vertical-align:baseline;
+}
+.rarity-pill.rarity-rare{
+  color:#ffcc33;background:rgba(255,204,51,.12);border:1px solid rgba(255,204,51,.5);
+  box-shadow:0 0 6px rgba(255,204,51,.35);
+}
+.rarity-pill.rarity-epic{
+  color:#d8a0ff;background:rgba(168,85,247,.14);border:1px solid rgba(168,85,247,.55);
+  animation:rarityPillPulse 2s ease-in-out infinite;
+}
+@keyframes rarityPillPulse{
+  0%,100%{box-shadow:0 0 5px rgba(168,85,247,.4)}
+  50%   {box-shadow:0 0 12px rgba(216,160,255,.95)}
 }
 
 .horse-info{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -309,7 +399,12 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   padding:10px 12px;margin-bottom:8px;
   display:flex;justify-content:space-between;align-items:center;
 }
-.upgrade-item.owned{opacity:.5}
+.upgrade-item.owned{
+  border-color:rgba(57,255,20,.4);
+  background:rgba(57,255,20,.04);
+}
+.upgrade-item.owned .upgrade-name{color:var(--accent)}
+.upgrade-item.owned .upgrade-desc{color:var(--accent)}
 .upgrade-info{flex:1}
 .upgrade-name{font-size:.85rem;font-weight:600}
 .upgrade-desc{font-size:.7rem;color:var(--text-muted);margin-top:2px}
@@ -357,7 +452,7 @@ h3{font-size:.9rem;font-weight:600;margin-bottom:.3em}
   <div class="header-stats">
     <span>Day <strong id="dayDisplay">1</strong></span>
     <span class="money">$<strong id="moneyDisplay">500</strong></span>
-    <span class="rep">Rep <span class="rep-bar"><span class="rep-bar-track"><span class="rep-bar-fill" id="repFill" style="width:0%"></span></span></span> <strong id="repDisplay">0</strong></span>
+    <span class="rep">Rep <span class="rep-bar"><span class="rep-bar-track"><span class="rep-bar-fill" id="repFill" style="width:0%"></span></span></span> <strong id="repDisplay">0</strong> <span id="repTitle" class="rep-title">Hand</span></span>
     <span>Energy <strong id="energyDisplay">3/3</strong></span>
   </div>
 </header>
