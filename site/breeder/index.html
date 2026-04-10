@@ -207,6 +207,27 @@ body{padding-top:92px} /* compensate for fixed header+tabs */
 .elite-trait strong{color:#d8a0ff;letter-spacing:.04em}
 .lineage-gone{color:var(--text-muted);font-style:italic;opacity:.65;text-decoration:line-through;text-decoration-thickness:1px}
 
+/* ── Sick horse indicator ───────────────────── */
+.horse-card.horse-sick{
+  border-color:rgba(255,68,68,.5)!important;
+  box-shadow:inset 0 0 12px rgba(255,68,68,.12);
+}
+.horse-card.horse-sick .horse-portrait{filter:saturate(.5) brightness(.85)}
+.sick-badge{
+  position:absolute;top:6px;left:8px;
+  font-family:'Courier New',monospace;font-size:.6rem;font-weight:700;
+  color:var(--red);
+  background:rgba(255,68,68,.15);
+  border:1px solid rgba(255,68,68,.5);
+  padding:2px 8px;border-radius:8px;
+  z-index:3;pointer-events:none;
+  animation:sickPulse 2s ease-in-out infinite;
+}
+@keyframes sickPulse{
+  0%,100%{box-shadow:0 0 4px rgba(255,68,68,.3)}
+  50%    {box-shadow:0 0 12px rgba(255,68,68,.7)}
+}
+
 /* ── Rarity reveal animations ───────────────── */
 
 /* Catch: rare gold border flash */

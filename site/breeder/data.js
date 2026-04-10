@@ -429,6 +429,7 @@ const RANDOM_EVENTS = [
   { name: 'Celebrity Buyer',   weight: 3,  effect: 'celebrity',     duration: 1, text: 'A celebrity wants to buy a horse! Premium prices offered.' },
   { name: 'Storm Warning',     weight: 10, effect: 'storm',         duration: 1, text: 'A storm blocks all exploration today.' },
   { name: 'Good Weather',      weight: 15, effect: 'goodWeather',   duration: 1, text: 'Beautiful day! Horses train more effectively today.' },
+  { name: 'Horse Flu',         weight: 8,  effect: 'horseFlu',      duration: 0, text: 'A mysterious illness is going around the stable...' },
 ];
 
 /* ── Care Shop ───────────────────────────────── */
@@ -445,4 +446,11 @@ const CARE_ACTIONS = [
   { key: 'treat',   name: 'Give Treat',     desc: 'A tasty reward',                 supply: 'treats',      happiness: 8,  effect: null },
   { key: 'brush',   name: 'Brush & Groom',  desc: 'Coat care + bonding',            supply: 'brush',       happiness: 6,  effect: 'brushed' },
   { key: 'apple',   name: 'Apple Basket',   desc: 'A whole basket of apples',       supply: 'appleBasket', happiness: 12, effect: 'clearOvertrain' },
+  { key: 'vet',     name: 'Vet Visit',      desc: 'Call the vet to cure illness ($50)', supply: null,      happiness: 2,  effect: 'cureIllness', cost: 50 },
 ];
+
+/* ── Illness constants ──────────────────────── */
+const ILLNESS_DURATION = [3, 5];    // sick lasts 3-5 days
+const ILLNESS_FLU_COUNT = [1, 2];   // Horse Flu event infects 1-2 horses
+const ILLNESS_SPONTANEOUS_CHANCE = 0.10; // 10% daily for horses below 30 happiness
+const ILLNESS_CONTAGION_CHANCE = 0.05;   // 5% daily per sick horse spreads to one other

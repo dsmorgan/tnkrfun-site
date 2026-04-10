@@ -589,6 +589,7 @@ function loadState() {
         if (h.careToday === undefined) h.careToday = 0;
         if (!h.rarity) h.rarity = 'common';
         if (h.eliteTrait === undefined) h.eliteTrait = null;
+        if (h.sick === undefined) h.sick = 0; // 0 = healthy, >0 = days of illness remaining
         h.coat = resolveCoatColor(h.genotype, h.age);
       });
       // Migrate nursery entries to include parent rarity for foal inheritance.
@@ -705,6 +706,41 @@ function endDay() {
     h.careToday = 0;      // reset care action limit
     h.brushed = false;     // reset grooming bonus
     if (!allPremiumFed) h.premiumFed = false; // only keep if fed today
+  });
+
+  // ── Illness system ──
+  const hasVet = state.upgrades.vetOnCall > 0;
+
+  // 1. Tick down existing illness durations; extra happiness drain while sick
+  state.stable.forEach(h => {
+    if (h.sick > 0) {
+      h.sick--;
+      h.happiness = clamp(h.happiness - 3, 0, 100);
+      if (h.sick === 0) {
+        daySummary.push('\uD83D\uDC9A ' + h.name + ' has recovered from illness!');
+      }
+    }
+  });
+
+  // 2. Contagion: each sick horse has a chance to spread to one healthy stablemate
+  const sickHorses = state.stable.filter(h => h.sick > 0);
+  sickHorses.forEach(sickH => {
+    if (Math.random() < ILLNESS_CONTAGION_CHANCE) {
+      const healthy = state.stable.filter(h => h.sick === 0 && h.id !== sickH.id);
+      if (healthy.length > 0) {
+        const victim = healthy[Math.floor(Math.random() * healthy.length)];
+        victim.sick = randRange(ILLNESS_DURATION[0], ILLNESS_DURATION[1]);
+        daySummary.push('\uD83E\uDDA0 ' + victim.name + ' caught an illness from ' + sickH.name + '!');
+      }
+    }
+  });
+
+  // 3. Spontaneous sickness: unhappy horses (< 30 happiness) risk getting sick
+  state.stable.forEach(h => {
+    if (h.sick === 0 && h.happiness < 30 && Math.random() < ILLNESS_SPONTANEOUS_CHANCE) {
+      h.sick = randRange(ILLNESS_DURATION[0], ILLNESS_DURATION[1]);
+      daySummary.push('\uD83E\uDD12 ' + h.name + ' has fallen ill from low spirits!');
+    }
   });
 
   // Nursery progress — parent snapshots ensure foals survive even if parents leave
@@ -989,6 +1025,24 @@ function triggerRandomEvent() {
     state.money = Math.max(0, state.money - fine);
     state.eventLog += ' You were fined $' + fine + ' for unlicensed breeding!';
   }
+  if (chosen.effect === 'horseFlu') {
+    if (state.upgrades.vetOnCall > 0) {
+      state.eventLog = 'The vet intercepted a Horse Flu outbreak! Your Vet on Call prevented any infections.';
+    } else {
+      const healthy = state.stable.filter(h => h.sick === 0);
+      const count = Math.min(healthy.length, randRange(ILLNESS_FLU_COUNT[0], ILLNESS_FLU_COUNT[1]));
+      const infected = [];
+      for (let i = 0; i < count && healthy.length > 0; i++) {
+        const idx = Math.floor(Math.random() * healthy.length);
+        const victim = healthy.splice(idx, 1)[0];
+        victim.sick = randRange(ILLNESS_DURATION[0], ILLNESS_DURATION[1]);
+        infected.push(victim.name);
+      }
+      if (infected.length > 0) {
+        state.eventLog += ' ' + infected.join(' and ') + ' got sick! (Lasts ' + ILLNESS_DURATION[0] + '-' + ILLNESS_DURATION[1] + ' days. Cure with Vet Visit in Care tab.)';
+      }
+    }
+  }
 }
 
 /* ── Breeding ────────────────────────────────── */
@@ -1199,6 +1253,15 @@ function createHorseCard(horse) {
     if (horse.rarity && horse.rarity !== 'common') {
       card.classList.add('new-shimmer');
     }
+  }
+
+  // Sick indicator
+  if (horse.sick > 0) {
+    card.classList.add('horse-sick');
+    const sickBadge = document.createElement('div');
+    sickBadge.className = 'sick-badge';
+    sickBadge.textContent = '\uD83E\uDD12 Sick (' + horse.sick + 'd)';
+    card.appendChild(sickBadge);
   }
 
   // Portrait
@@ -1440,7 +1503,7 @@ function getNurseryCap() {
 }
 
 function canBreed(horse) {
-  return horse.breedCooldown <= 0 && horse.age >= 2;
+  return horse.breedCooldown <= 0 && horse.age >= 2 && !horse.sick;
 }
 
 function predictBreeding(parentA, parentB) {
@@ -1711,6 +1774,7 @@ function createBreedSlot(label, horseId) {
       info.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
       info.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ';
       appendBadges(info, horse);
+      info.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age)));
       slot.appendChild(info);
 
       const btnRow = document.createElement('div');
@@ -1769,25 +1833,50 @@ function openHorsePicker(slotLabel) {
   modal.appendChild(title);
 
   const otherSlotId = slotLabel === 'A' ? breedSlotB : breedSlotA;
+  const otherHorse = otherSlotId ? state.stable.find(h => h.id === otherSlotId) : null;
+  // If the other slot has a horse, only show opposite sex
+  const requiredSex = otherHorse ? (otherHorse.sex === 'mare' ? 'stallion' : 'mare') : null;
 
-  // Filter eligible horses
-  const eligible = state.stable.filter(h => {
-    if (h.id === otherSlotId) return false; // can't breed with self
-    if (!canBreed(h)) return false;
-    return true;
-  });
+  // Show ALL horses (not just eligible) — ineligible ones are grayed with a reason.
+  const horses = state.stable.filter(h => h.id !== otherSlotId); // exclude the one already in the other slot
 
-  if (eligible.length === 0) {
+  if (horses.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = 'No eligible horses. Horses must be at least 2 years old and not on breeding cooldown.';
+    empty.textContent = 'No horses in your stable.';
     modal.appendChild(empty);
   }
 
-  eligible.forEach(horse => {
+  // Sort eligible first, then ineligible
+  const getIneligibleReason = (h) => {
+    if (requiredSex && h.sex !== requiredSex) return 'Needs ' + requiredSex;
+    if (isPregnantMare(h)) return 'Pregnant';
+    if (h.sick > 0) return 'Sick (' + h.sick + 'd remaining)';
+    if (h.breedCooldown > 0) return 'Breed CD: ' + h.breedCooldown + 'd';
+    if (h.age < 2) return 'Too young (age ' + Math.floor(h.age) + ')';
+    return null;
+  };
+  horses.sort((a, b) => {
+    const ra = getIneligibleReason(a), rb = getIneligibleReason(b);
+    if (!ra && rb) return -1;
+    if (ra && !rb) return 1;
+    return 0;
+  });
+
+  horses.forEach(horse => {
+    const reason = getIneligibleReason(horse);
+    const isEligible = !reason;
+
     const card = document.createElement('div');
-    card.className = 'horse-card';
-    card.style.cssText = 'border-left-color:' + horse.coat.bodyHex + ';cursor:pointer;margin-bottom:8px';
+    card.className = 'horse-card rarity-' + (horse.rarity || 'common');
+    card.style.cssText = 'border-left-color:' + horse.coat.bodyHex + ';margin-bottom:8px';
+    if (isEligible) {
+      card.style.cursor = 'pointer';
+    } else {
+      card.style.opacity = '.45';
+      card.style.filter = 'grayscale(.5)';
+      card.style.cursor = 'not-allowed';
+    }
 
     const portrait = document.createElement('div');
     portrait.className = 'horse-portrait';
@@ -1809,15 +1898,25 @@ function openHorsePicker(slotLabel) {
     details.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age)));
     info.appendChild(details);
 
+    // Show reason why ineligible
+    if (reason) {
+      const reasonEl = document.createElement('div');
+      reasonEl.style.cssText = 'font-size:.65rem;color:var(--red);font-family:"Courier New",monospace;margin-top:2px';
+      reasonEl.textContent = '\u26D4 ' + reason;
+      info.appendChild(reasonEl);
+    }
+
     card.appendChild(portrait);
     card.appendChild(info);
 
-    card.addEventListener('click', () => {
-      if (slotLabel === 'A') breedSlotA = horse.id;
-      else breedSlotB = horse.id;
-      hideModal();
-      renderBreedTab();
-    });
+    if (isEligible) {
+      card.addEventListener('click', () => {
+        if (slotLabel === 'A') breedSlotA = horse.id;
+        else breedSlotB = horse.id;
+        hideModal();
+        renderBreedTab();
+      });
+    }
 
     modal.appendChild(card);
   });
@@ -1973,6 +2072,7 @@ function renderTrainTab() {
       detailLine.style.cssText = 'font-size:.65rem;color:var(--text-muted)';
       detailLine.textContent = horse.breedLabel + ' \u2022 ';
       appendBadges(detailLine, horse);
+      detailLine.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age)));
       info.appendChild(detailLine);
       card.appendChild(info);
 
@@ -2015,7 +2115,7 @@ function renderTrainTab() {
     headerInfo.appendChild(nameEl);
     const coatEl = document.createElement('div');
     coatEl.style.cssText = 'font-size:.75rem;color:var(--gold)';
-    coatEl.textContent = horse.coat.fullName + ' ' + horse.breedLabel;
+    coatEl.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 Age ' + Math.floor(horse.age);
     headerInfo.appendChild(coatEl);
     horseHeader.appendChild(headerInfo);
     trainPanel.appendChild(horseHeader);
@@ -2130,6 +2230,11 @@ function renderTrainTab() {
 
 function doTraining(horse, statKey) {
   if (state.energy < 1) return;
+  if (horse.sick) {
+    state.eventLog = horse.name + ' is too sick to train. Cure with a Vet Visit in the Care tab.';
+    renderFooter();
+    return;
+  }
   state.energy--;
 
   const talent = horse.talents[statKey];
@@ -2168,7 +2273,8 @@ function doTraining(horse, statKey) {
   let baseGain = randRange(3, 6) + facilityBonus;
   if (horse.premiumFed) baseGain = Math.round(baseGain * 1.5);
   if (horse.brushed) { baseGain += 1; horse.brushed = false; }
-  let gain = Math.max(1, Math.round(baseGain * diminishing * happinessMulti * youngBonus * weatherBonus));
+  const sickPenalty = horse.sick ? 0.5 : 1.0;
+  let gain = Math.max(1, Math.round(baseGain * diminishing * happinessMulti * youngBonus * weatherBonus * sickPenalty));
   gain = Math.min(gain, headroom); // don't exceed talent
 
   horse.stats[statKey] = current + gain;
@@ -2287,6 +2393,11 @@ function computeEventScore(horse, evt) {
 
 function doCompetition(horse, eventKey, evt) {
   if (state.energy < 1) return;
+  if (horse.sick) {
+    state.eventLog = horse.name + ' is too sick to compete. Cure with a Vet Visit in the Care tab.';
+    renderFooter();
+    return;
+  }
   state.energy--;
   horse.competeCooldown = 1;
 
@@ -2647,15 +2758,40 @@ function doCareAction(horse, action) {
   horse.happiness = clamp(horse.happiness + action.happiness, 0, 100);
   horse.careToday = (horse.careToday || 0) + 1;
 
+  // Pay gold cost if any (Vet Visit)
+  if (action.cost) {
+    if (state.money < action.cost) {
+      state.eventLog = 'Not enough money for ' + action.name + '. Need $' + action.cost + '.';
+      renderCareTab();
+      return;
+    }
+    state.money -= action.cost;
+  }
+
   // Apply special effect
   if (action.effect === 'brushed') {
     horse.brushed = true;
   } else if (action.effect === 'clearOvertrain') {
     horse.trainStreak = 0;
     horse.lastTrainedStat = null;
+  } else if (action.effect === 'cureIllness') {
+    if (horse.sick > 0) {
+      horse.sick = 0;
+      state.eventLog = '\uD83D\uDC9A The vet cured ' + horse.name + '! They\'re healthy again.' + (action.cost ? ' ($' + action.cost + ')' : '');
+      saveState();
+      renderHeader();
+      renderCareTab();
+      return;
+    } else {
+      state.eventLog = horse.name + ' is already healthy. No treatment needed.';
+      // Refund the cost since we charged above
+      if (action.cost) state.money += action.cost;
+      renderCareTab();
+      return;
+    }
   }
 
-  state.eventLog = horse.name + ' enjoyed ' + action.name.toLowerCase() + '! (+' + action.happiness + ' happiness)';
+  state.eventLog = horse.name + ' enjoyed ' + action.name.toLowerCase() + '! (+' + action.happiness + ' happiness)' + (action.cost ? ' ($' + action.cost + ')' : '');
   saveState();
   renderCareTab();
 }
@@ -3240,6 +3376,7 @@ function renderMatchingHorses(container, buyer) {
       detailLine.style.cssText = 'font-size:.7rem;color:var(--text-muted)';
       detailLine.textContent = horse.coat.fullName + ' ' + horse.breedLabel + ' \u2022 ';
       appendBadges(detailLine, horse);
+      detailLine.appendChild(document.createTextNode(' \u2022 Age ' + Math.floor(horse.age)));
       info.appendChild(detailLine);
 
       // Match details
