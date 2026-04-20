@@ -1,0 +1,9 @@
+[submodule "site/breeder"]
+	path = site/breeder
+	url = https://github.com/dsmorgan/tinker-breeder.git
+[submodule "site/tinker-impact"]
+	path = site/tinker-impact
+	url = https://github.com/dsmorgan/tinker-impact.git
+[submodule "site/tinker-tides"]
+	path = site/tinker-tides
+	url = https://github.com/dsmorgan/tinker-tides.git
