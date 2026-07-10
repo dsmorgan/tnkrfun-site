@@ -3,6 +3,8 @@ services:
     image: nginx:alpine
     volumes:
       - ./site:/usr/share/nginx/html:ro,Z
+      - ./district11:/usr/share/nginx/district11:ro,Z
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro,Z
     ports:
       - "8025:80"
     restart: unless-stopped
